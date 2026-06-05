@@ -1,5 +1,5 @@
 // Глобальный список для автодополнения в main.js
-const COMMAND_LIST = ['get', 'help', 'clear', 'echo', 'reboot', 'upload','settings','browse'];
+const COMMAND_LIST = ['get', 'help', 'clear', 'echo', 'reboot', 'upload','settings','browse','changelogs'];
 
 const CommandHandler = {
     async execute(rawInput, terminal) {
@@ -69,6 +69,31 @@ const CommandHandler = {
             case 'browse':
                 CmdBrowse.execute(args, terminal);
                 break;
+            case 'changelogs':
+                    const content = await StepRenderer.fromFile('./changelogs.txt', '', false);
+
+                    WindowManager.open('CHANGELOGS', 'CHANGELOGS', `
+        <body>
+            <center>
+                <img src="assets/images/scp-animated.svg" style="width:25%;height:25%">
+            </center>
+            <div style="text-align:center;">
+                <p>SCP FOUNDATION'S DOSSIER HUB</p>
+                <p>[BETA BRANCH]</p>
+                <h1>CHANGELOGS</h1>
+            </div>
+            <hr style="border-color:#00EE00">
+            <div style="height:1.5em;"></div>
+            <div>${content}</div>
+        </body>
+    `, {
+                        width: 420,
+                        height: 420,
+                        status: 'SITE-VERSION: 1.1-03_BETA',
+                        backdrop: false,
+                        isResizable: false
+                    });
+                    break;
             default:
                 if (cmd !== '') {
                     terminal.printError(`КОМАНДА НЕ РАСПОЗНАНА: ${cmd}. Введите help для списка команд.`);

@@ -801,6 +801,8 @@ body.locked { overflow: hidden; }
     text-shadow: 0 0 15px var(--theme-color), 2px 2px 0 rgba(255,0,80,0.3), -2px -2px 0 rgba(0,255,200,0.3);
 }
 
+.dossier-scope { display: contents; }
+
 /* Мгновенный показ всех слов без анимации (при скипе) */
 .skip-reveal .word {
     opacity: 1 !important;

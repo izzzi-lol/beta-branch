@@ -35,6 +35,22 @@ async function handleUrlParams() {
 }
 
 
+// --- ПОКАЗ ОКНА СО СПИСКОМ ИЗМЕНЕНИЙ ---
+async function showChangelogs(){
+    const cahcedLUC = localStorage.getItem('cachedLUC');
+
+    const changelogsFile = await fetch('changelogs.txt');
+    if (!changelogsFile.ok) { throw new Error(changelogsFile.error); }
+
+    const lastUpdatedChangelogs = (await changelogsFile.text()).split('\n')[0]
+        .replace(/!COM /g, '');
+
+    if (lastUpdatedChangelogs !== cahcedLUC) {
+        await CommandHandler.execute('changelogs', TerminalAPI);
+        localStorage.setItem('cachedLUC', lastUpdatedChangelogs);
+    }
+}
+
 // --- SCP СПЛЭШ ---
 async function showSplash() {
     const splash = document.getElementById('scp-splash');
@@ -83,6 +99,7 @@ async function showSplash() {
     });
     sub.classList.remove('show');
     input.focus();
+    showChangelogs();
     await handleUrlParams();
 }
 
@@ -199,7 +216,9 @@ window.onload = async () => {
         authOverlay.style.display = 'none';
         document.body.classList.remove('locked');
         input.focus();
+        showChangelogs();
     }
+
     AudioHandler.playUI('ambient');
     await renderer.render("[SIZE=24][SCP FOUNDATION'S DOSSIER HUB][/SIZE][TIMER=1]",
         output, '', null, false);

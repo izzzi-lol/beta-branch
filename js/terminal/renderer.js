@@ -101,22 +101,26 @@ class StepRenderer {
     //  CSS-ТЕМА
     // =========================================================================
 
-    _resetTheme() {
-        const def = '#a200ff';
-        document.documentElement.style.setProperty('--theme-color',        def);
-        document.documentElement.style.setProperty('--theme-quote-border', def);
-        document.documentElement.style.setProperty('--theme-quote-bg',     'rgba(162,0,255,0.05)');
-        document.documentElement.style.setProperty('--theme-table-bg',     'rgba(162,0,255,0.2)');
+    // =========================================================================
+    //  CSS-ТЕМА (скоупинг на уровне досье)
+    //  Вместо document.documentElement меняем переменные на scopeEl —
+    //  обёртке конкретного досье. Каждое досье живёт в своём пузыре
+    //  и не перекрашивает соседей.
+    // =========================================================================
+
+    _defaultThemeVars() {
+        return '--theme-color:#a200ff;--theme-quote-border:#a200ff;' +
+            '--theme-quote-bg:rgba(162,0,255,0.05);--theme-table-bg:rgba(162,0,255,0.2)';
     }
 
-    _applyTheme(colors) {
+    _applyThemeToScope(scopeEl, colors) {
         const base   = colors['Mainpage'] || '#a200ff';
         const quotes = colors['Quotes']   || base;
         const tables = colors['Tables']   || base;
-        document.documentElement.style.setProperty('--theme-color',        base);
-        document.documentElement.style.setProperty('--theme-quote-border', quotes);
-        document.documentElement.style.setProperty('--theme-quote-bg',     quotes + '0D');
-        document.documentElement.style.setProperty('--theme-table-bg',     tables + '33');
+        scopeEl.style.setProperty('--theme-color',        base);
+        scopeEl.style.setProperty('--theme-quote-border', quotes);
+        scopeEl.style.setProperty('--theme-quote-bg',     quotes + '0D');
+        scopeEl.style.setProperty('--theme-table-bg',     tables + '33');
     }
 
     // =========================================================================
@@ -130,7 +134,7 @@ class StepRenderer {
     // =========================================================================
 
     /** 1. Чистый Markdown без обработки тегов. */
-    _applyMD(str, state) {
+    _applyMD(str, state = { disableTags: false, disableMD: false }) {
         if (state.disableMD) return str;
         return str
             .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
@@ -272,10 +276,25 @@ class StepRenderer {
         ];
     }
 
+    /**
+     * Кешированный вариант NESTABLE_TAGS с уже скомпилированными RegExp.
+     * Компиляция происходит ровно один раз при первом обращении —
+     * избавляет _parseSegment от new RegExp(...) на каждой итерации.
+     */
+    static get _COMPILED_NESTABLE_TAGS() {
+        if (!StepRenderer.__compiledTags) {
+            StepRenderer.__compiledTags = StepRenderer.NESTABLE_TAGS.map(({ name, openRe }) => ({
+                name,
+                re: new RegExp(openRe.source, 'i'),
+            }));
+        }
+        return StepRenderer.__compiledTags;
+    }
+
     _parseSegment(text, state) {
         let earliest = null;
-        for (const { name, openRe } of StepRenderer.NESTABLE_TAGS) {
-            const m = new RegExp(openRe.source, 'i').exec(text);
+        for (const { name, re } of StepRenderer._COMPILED_NESTABLE_TAGS) {
+            const m = re.exec(text);
             if (m && (earliest === null || m.index < earliest.index)) {
                 earliest = { index: m.index, full: m[0], name, attr: m[1] };
             }
@@ -527,13 +546,21 @@ class StepRenderer {
         const RE_H3       = /^\[H3\]|^###/i;
         const RE_LIST     = /^[-*]\s+/;
 
-        this._resetTheme();
+        // Скоупированная обёртка досье — CSS-переменные темы задаются здесь,
+        // а не на documentElement, поэтому каждое досье красится независимо.
+        const scopeEl = document.createElement('div');
+        scopeEl.className = 'dossier-scope';
+        scopeEl.style.cssText = this._defaultThemeVars();
+        output.appendChild(scopeEl);
+        const scopedOutput = scopeEl;
+        this._output = scopedOutput;
+
         if (renderStartEnd) {
-            // Маркер начала документа
+            // Маркер начала — вне скоупа (системный элемент)
             const startLine = document.createElement('div');
             startLine.classList.add('doc-line');
             startLine.appendChild(Object.assign(document.createElement('span'), {textContent: '[НАЧАЛО ДОКУМЕНТА]'}));
-            output.appendChild(startLine);
+            output.insertBefore(startLine, scopeEl);
         }
         try {
             for (let line of lines) {
@@ -566,7 +593,7 @@ class StepRenderer {
                         const [k, v] = pair.split('=');
                         if (k && v) colors[k.trim()] = v.trim();
                     });
-                    this._applyTheme(colors);
+                    this._applyThemeToScope(scopeEl, colors);
                     continue;
                 }
 
@@ -576,7 +603,7 @@ class StepRenderer {
                 if (line.startsWith('[/QUOTE]'))    { currentQuote    = null; continue; }
 
                 let el;
-                let targetContainer = output;
+                let targetContainer = scopedOutput;
 
                 // ─────────────────────────────────────────────────────────────
                 //  БЛОЧНЫЕ ТЕГИ
@@ -725,13 +752,13 @@ class StepRenderer {
                         if (!currentList) {
                             currentList = document.createElement('ul');
                             currentList.className = 'scp-list';
-                            const parent = currentQuote ?? currentFootnote ?? output;
+                            const parent = currentQuote ?? currentFootnote ?? scopedOutput;
                             parent.appendChild(currentList);
                         }
                         targetContainer = currentList;
                     } else {
                         currentList = null;
-                        targetContainer = currentQuote ?? currentFootnote ?? output;
+                        targetContainer = currentQuote ?? currentFootnote ?? scopedOutput;
                     }
 
                     const html = this._applyInlineMarkdown(line, parserState);
@@ -751,7 +778,7 @@ class StepRenderer {
             return;
         }
         if (renderStartEnd) {
-            // Маркер конца документа
+            // Маркер конца — вне скоупа (системный элемент)
             const endLine = document.createElement('div');
             endLine.classList.add('doc-line');
             endLine.appendChild(Object.assign(document.createElement('span'), {textContent: '[КОНЕЦ ДОКУМЕНТА]'}));
@@ -759,5 +786,264 @@ class StepRenderer {
             this._scheduleScroll();
         }
         this._skip = false;
+    }
+
+    // =========================================================================
+    //  ВСПОМОГАТЕЛЬНЫЕ УТИЛИТЫ
+    // =========================================================================
+
+    /**
+     * Экранирует HTML-спецсимволы для безопасной вставки в атрибуты и текст.
+     * Используется в toHTML, где нет защиты через .textContent.
+     */
+    static _escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    // =========================================================================
+    //  СТАТИЧЕСКИЙ РЕНДЕР (без анимации)
+    // =========================================================================
+
+    /**
+     * Конвертирует сырой текст в готовый HTML без анимации.
+     * Полный аналог render() — поддерживает все блочные и инлайн-теги —
+     * но синхронный и возвращает строку вместо модификации DOM.
+     *
+     * Архитектурные решения:
+     *  • Массивы + join('')  вместо строкового += → O(n) конкатенация
+     *  • quoteBuf / footBuf  — буферы для вложенного контента
+     *  • tableBuf / listBuf  — буферы строк таблицы и пунктов списка
+     *  • _COMPILED_NESTABLE_TAGS (унаследовано) — регексы компилируются один раз
+     *
+     * @param {string}  content
+     * @param {string}  [basePath='']         Базовый путь для ресурсов
+     * @param {object}  [localImageMap={}]    Карта имён → data-URL
+     * @param {boolean} [renderStartEnd=true] Маркеры начала/конца документа
+     * @returns {string} Готовая HTML-строка
+     */
+    toHTML(content, basePath = '', localImageMap = {}, renderStartEnd = true) {
+        const lines = content.split('\n');
+        const st    = { disableTags: false, disableMD: false };  // parserState
+        const E     = StepRenderer._escapeHtml;
+        const md    = (t) => this._applyInlineMarkdown(t, st);
+
+        // Буферы — массивы, не строки, чтобы избежать O(n²) при +=
+        const out      = [];   // главный буфер
+        const quoteBuf = [];   // контент внутри [QUOTE]
+        const footBuf  = [];   // контент внутри [FOOTNOTE]
+        const tableBuf = [];   // <tr>-строки текущей таблицы
+        const listBuf  = [];   // <li>-пункты текущего списка
+
+        let inTable    = false;
+        let inQuote    = false;
+        let inFootnote = false;
+        let inList     = false;
+
+        /** Активный буфер контента: quote → footnote → main. */
+        const cur = () => inQuote ? quoteBuf : inFootnote ? footBuf : out;
+
+        /**
+         * Закрывает накопленный список и сбрасывает его в cur().
+         * splice(0) опустошает listBuf атомарно — не нужен отдельный сброс.
+         */
+        const flushList = () => {
+            if (!inList) return;
+            inList = false;
+            cur().push(`<ul class="scp-list">${listBuf.splice(0).join('')}</ul>\n`);
+        };
+
+        /**
+         * Закрывает текущую таблицу и сбрасывает её в главный буфер.
+         * Таблицы всегда идут в out (как в render() — targetContainer = output).
+         */
+        const flushTable = () => {
+            if (!inTable) return;
+            inTable = false;
+            out.push(
+                `<div class="table-wrapper visible">` +
+                `<table class="table6">${tableBuf.splice(0).join('')}</table>` +
+                `</div>\n`
+            );
+        };
+
+        const RE_SPEED = /^\[SCROLLSPEED=([0-9.]+)\]$/i;
+        const RE_TIMER = /^\[TIMER=([0-9.]+)\]$/i;
+
+        if (renderStartEnd) {
+            out.push('<div class="doc-line"><span>[НАЧАЛО ДОКУМЕНТА]</span></div>\n');
+        }
+
+        for (let line of lines) {
+            line = line.trim();
+            if (!line || line.startsWith('!COM')) continue;
+
+            // ── Директивы без эффекта в статическом HTML ──────────────────
+            if (RE_SPEED.test(line) || RE_TIMER.test(line) ||
+                /^\[(?:CHAR|WORD)MODE\]$/i.test(line)      ||
+                line.startsWith('[COLORCODES]')) continue;
+
+            // ── Закрывающие блочные теги ───────────────────────────────────
+            if (line.startsWith('[/TABLE6]')) {
+                flushList();
+                flushTable();
+                continue;
+            }
+            if (line.startsWith('[/QUOTE]')) {
+                flushList();
+                out.push(`<blockquote>${quoteBuf.splice(0).join('')}</blockquote>\n`);
+                inQuote = false;
+                continue;
+            }
+            if (line.startsWith('[/FOOTNOTE]')) {
+                flushList();
+                out.push(`<div class="footnote">${footBuf.splice(0).join('')}</div>\n`);
+                inFootnote = false;
+                continue;
+            }
+
+            // ── Самодостаточные блочные теги (всегда → out, как в render()) ─
+            if (line.startsWith('[TITLE]')) {
+                flushList();
+                out.push(`<span class="glitch-title">${E(line.slice(7).trim())}</span>\n`);
+                continue;
+            }
+            if (line.startsWith('[DANGER]')) {
+                flushList();
+                out.push(`<div class="danger-diamond">${E(line.slice(8).trim())}</div>\n`);
+                continue;
+            }
+            if (line.startsWith('[IMAGE]')) {
+                flushList();
+                const parts = line.slice(7).split('||');
+                const name  = parts[0].trim();
+                const cap   = E(parts[1]?.trim() ?? '');
+                const mode  = parts[2]?.trim().toLowerCase() ?? 'right';
+                const scale = parseFloat(parts[3]);
+                const src   = localImageMap?.[name] ?? `${basePath}images/${name}`;
+                out.push(
+                    `<div class="scp-image-container ${mode}-mode visible"` +
+                    (isNaN(scale) ? '' : ` style="--img-scale:${scale}"`) + `>` +
+                    `<img src="${src}" alt="${cap}">` +
+                    `<div class="scp-image-caption">${cap}</div></div>\n`
+                );
+                continue;
+            }
+            if (line.startsWith('[TABLE6]'))   { flushList(); inTable    = true; continue; }
+            if (line.startsWith('[QUOTE]'))    { flushList(); inQuote    = true; continue; }
+            if (line.startsWith('[FOOTNOTE]')) { flushList(); inFootnote = true; continue; }
+
+            // ── Строки таблицы ─────────────────────────────────────────────
+            if (inTable && line.includes('||')) {
+                tableBuf.push(
+                    `<tr>${line.split('||').map(c => `<td>${md(c.trim())}</td>`).join('')}</tr>\n`
+                );
+                continue;
+            }
+
+            // ── Элементы списка ────────────────────────────────────────────
+            const listMatch = line.match(/^[-*]\s+(.*)/);
+            if (listMatch) {
+                inList = true;
+                let itemText = listMatch[1];
+                let liCls = '';
+                if (itemText.includes('[CENTER]')) {
+                    liCls = ' class="center"';
+                    itemText = itemText.replace('[CENTER]', '').trim();
+                }
+                listBuf.push(`<li${liCls}>${md(itemText)}</li>\n`);
+                continue;
+            }
+
+            // Конец блока списка — сброс перед любой нелистовой строкой
+            flushList();
+
+            // ── Горизонтальная черта / пустая строка ──────────────────────
+            if (line === '---' || line === '***') {
+                cur().push('<hr class="scp-hr">\n');
+                continue;
+            }
+            if (line === '.') {
+                cur().push('<div style="height:1.5em"></div>\n');
+                continue;
+            }
+
+            // ── Заголовки — Markdown-стиль (#, ##, …) ─────────────────────
+            const mdH = line.match(/^(#{1,6})\s+(.*)/);
+            if (mdH) {
+                const lvl = mdH[1].length;
+                let text = mdH[2];
+                let cls  = `scp-header scp-h${lvl}`;
+                if (text.includes('[CENTER]')) {
+                    cls += ' center';
+                    text = text.replace('[CENTER]', '').trim();
+                }
+                cur().push(`<h${lvl} class="${cls}">${md(text)}</h${lvl}>\n`);
+                continue;
+            }
+
+            // ── Заголовки — устаревший стиль [H1]–[H6] ────────────────────
+            const legH = line.match(/^\[H([1-6])\]/i);
+            if (legH) {
+                const lvl = legH[1];
+                let text = line.slice(legH[0].length).trim();
+                let cls  = `scp-header scp-h${lvl}`;
+                if (text.includes('[CENTER]')) {
+                    cls += ' center';
+                    text = text.replace('[CENTER]', '').trim();
+                }
+                cur().push(`<h${lvl} class="${cls}">${md(text)}</h${lvl}>\n`);
+                continue;
+            }
+
+            // ── Обычный параграф (с опциональным [CENTER]) ─────────────────
+            let pCls = '';
+            if (line.includes('[CENTER]')) {
+                pCls = ' class="center"';
+                line = line.replace('[CENTER]', '').trim();
+            }
+            cur().push(`<p${pCls}>${md(line)}</p>\n`);
+        }
+
+        // ── Сброс незакрытых контейнеров ───────────────────────────────────
+        flushList();
+        flushTable();
+        if (inQuote    && quoteBuf.length) out.push(`<blockquote>${quoteBuf.join('')}</blockquote>\n`);
+        if (inFootnote && footBuf.length)  out.push(`<div class="footnote">${footBuf.join('')}</div>\n`);
+
+        if (renderStartEnd) {
+            out.push('<div class="doc-line"><span>[КОНЕЦ ДОКУМЕНТА]</span></div>\n');
+        }
+
+        return out.join('');
+    }
+
+    /**
+     * Загружает текстовый файл по пути и возвращает готовый HTML через toHTML().
+     *
+     * basePath определяется автоматически из filePath — картинки и прочие
+     * ресурсы ищутся относительно папки файла, как это делает render().
+     *
+     * @param {string}  filePath                  Путь к .txt-файлу досье
+     * @param {object}  [localImageMap={}]         Карта имён → data-URL
+     * @param {boolean} [renderStartEnd=true]      Маркеры начала/конца
+     * @returns {Promise<string>}
+     *
+     * @example
+     *   const html = await StepRenderer.fromFile('assets/texts/changelogs.txt');
+     *   WindowManager.open('CHANGELOGS', 'CHANGELOGS', `<body>${html}</body>`, opts);
+     */
+    static async fromFile(filePath, localImageMap = {}, renderStartEnd = true) {
+        const resp = await fetch(filePath);
+        if (!resp.ok) throw new Error(
+            `StepRenderer.fromFile: не удалось загрузить «${filePath}» (HTTP ${resp.status})`
+        );
+        const content  = await resp.text();
+        // «dossiers/01-B/file.txt» → basePath = «dossiers/01-B/»
+        const basePath = filePath.slice(0, filePath.lastIndexOf('/') + 1);
+        return new StepRenderer().toHTML(content, basePath, localImageMap, renderStartEnd);
     }
 }
