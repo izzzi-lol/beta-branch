@@ -1,0 +1,1030 @@
+:root {
+    --accent: 28, 37, 56;
+    --head-font: 'VT323', monospace;           /* ← CRT заголовки */
+    --mono-font: 'JetBrains Mono', monospace;
+    --page-font: 'JetBrains Mono', monospace; /* ← весь текст теперь моно */
+    --danger-color: #E6283C;
+    --terminal-green: #00ff41;
+
+    /* CRT эффекты */
+    --phosphor-glow: 0 0 6px rgba(0, 255, 65, 0.55);
+    --text-glow:     0 0 3px rgba(220, 220, 220, 0.25);
+    --scan-dark:     rgba(0, 0, 0, 0.18);
+
+    /* Цвета темы (Мираж по умолчанию) */
+    --theme-color: #00ff21;
+    --theme-quote-border: #00a809;
+    --theme-quote-bg: rgba(0, 168, 9, 0.05);
+    --theme-table-bg: rgb(0, 209, 59);
+    --img-scale: 1;
+}
+
+/* 1. БАЗОВЫЕ НАСТРОЙКИ */
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #000;
+}
+
+body {
+    font-family: var(--page-font);
+    color: #d1d1d1;
+}
+
+del {
+    text-decoration: line-through !important;
+    color: inherit;
+    text-decoration-color: #a00000;
+}
+
+del .word {
+    text-decoration: line-through !important;
+    text-decoration-color: #a00000;
+}
+/* 2. КОНТЕЙНЕР */
+#container {
+    width: 100vw;
+    height: 100dvh;
+    background: #080808;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    /* Лёгкое мерцание CRT */
+    animation: crtFlicker 10s infinite;
+}
+
+#beta-badge {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 99999;
+    padding: 3px 0;
+    background: rgba(220, 30, 30, 0.08);
+    border-bottom: 1px solid rgba(220, 30, 30, 0.45);
+    color: rgba(220, 30, 30, 0.85);
+    font-family: var(--mono-font);
+    font-size: 1.25em;
+    letter-spacing: 3px;
+    text-align: center;
+    pointer-events: none;
+}
+
+@keyframes crtFlicker {
+    0%,  18%, 20%, 22%, 52%, 54%, 65%, 100% { opacity: 1; }
+    19%, 21%                                  { opacity: 0.94; }
+    53%                                       { opacity: 0.96; }
+    66%                                       { opacity: 0.97; }
+}
+
+/* === CRT ОВЕРЛЕЙ (scanlines + vignette) === */
+#crt-fx {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9998; /* под auth-overlay (9999), над всем остальным */
+}
+
+/* Горизонтальные scanlines */
+#crt-scanlines {
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 2px,
+        var(--scan-dark) 2px,
+        var(--scan-dark) 4px
+    );
+    mix-blend-mode: multiply;
+}
+
+/* Виньетка по краям */
+#crt-vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+        ellipse 88% 82% at 50% 50%,
+        transparent 45%,
+        rgba(0, 0, 0, 0.55) 100%
+    );
+}
+
+/* 3. КОНСОЛЬ — РЕДИЗАЙН */
+#console-area {
+    font-family: var(--mono-font);
+    background: #020202;
+    border-bottom: 1px solid rgba(0, 255, 65, 0.18);
+    border-left: none; /* убираем старую полосу */
+    box-shadow: 0 2px 24px rgba(0, 255, 65, 0.06), inset 0 -1px 0 rgba(0,255,65,0.08);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+    flex-shrink: 0;
+    padding: 0;
+    position: relative;
+}
+
+/* Верхняя мета-полоска */
+#console-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: calc(6px + env(safe-area-inset-top)) 20px 5px 20px;
+    border-bottom: 1px solid rgba(0, 255, 65, 0.07);
+    font-size: 0.6em;
+    letter-spacing: 1.5px;
+    color: rgba(0, 255, 65, 0.4);
+}
+
+.meta-tag {
+    background: rgba(0, 255, 65, 0.07);
+    border: 1px solid rgba(0, 255, 65, 0.15);
+    padding: 1px 7px;
+    border-radius: 2px;
+}
+
+.meta-spacer { flex: 1; }
+
+.meta-clock {
+    color: rgba(0, 255, 65, 0.55);
+    letter-spacing: 2px;
+}
+
+/* Строка ввода */
+#console-input-row {
+    display: flex;
+    align-items: center;
+    padding: 10px 20px 12px 20px;
+}
+
+/* Свечение на cursor */
+#cmd-input {
+    caret-color: var(--terminal-green);
+    text-shadow: var(--text-glow);
+}
+
+/* Prompt с phosphor glow */
+.prompt {
+    color: var(--terminal-green);
+    font-weight: bold;
+    margin-right: 10px;
+    text-shadow: var(--phosphor-glow);
+    white-space: nowrap;
+}
+
+/* 4. ОБЛАСТЬ ВЫВОДА */
+#dossier-output {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 20px 40px;
+    box-sizing: border-box;
+    line-height: 1.7;
+    scroll-behavior: smooth;
+    /* Лёгкий phosphor тint */
+    background: linear-gradient(180deg, rgba(0,255,65,0.012) 0%, transparent 120px);
+}
+
+/* Лёгкое свечение на тексте вывода */
+#dossier-output p,
+#dossier-output li,
+#dossier-output td {
+    text-shadow: var(--text-glow);
+}
+
+/* Зелёный системный текст — сильнее светится */
+#dossier-output div[style*="terminal-green"],
+#dossier-output div[style*="--terminal-green"] {
+    text-shadow: var(--phosphor-glow);
+}
+
+/* 5. КОНТЕНТ И ОБТЕКАНИЕ */
+#dossier-output p {
+    margin-bottom: 1em;
+    display: block; /* Разрешаем обтекание */
+}
+
+/* Цитаты */
+blockquote {
+    border-left: 4px solid var(--theme-quote-border);
+    background: var(--theme-quote-bg);
+    padding: 15px 25px;
+    margin: 20px 0;
+    font-style: italic;
+    color: #bbb;
+    display: block; /* Убрали flow-root, теперь цитата поднимется к фото */
+}
+
+/* ТАБЛИЦЫ (Твой дизайн сохранен!) */
+.table-wrapper { 
+    margin: 25px 0; 
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    opacity: 0; 
+    transition: opacity 0.5s; 
+    display: block; /* Разрешаем таблице обтекать картинку */
+}
+
+.table-wrapper.visible { opacity: 1; }
+
+.table6 { 
+    width: 100%; 
+    border-collapse: collapse; 
+    font-family: var(--mono-font); 
+}
+
+.table6 td { 
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05); 
+    padding: 14px 18px; 
+    font-size: 0.85em; 
+    color: #ccc;
+    vertical-align: middle;
+}
+
+.table6 tr:first-child { 
+    background: var(--theme-table-bg); 
+    color: #fff; 
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 0.8em;
+}
+
+.table6 tr:first-child td {
+    border-bottom: 2px solid var(--theme-color);
+    color: #fff;
+    font-weight: 700;
+}
+
+.table6 tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
+.table6 tr:hover { background: rgba(255, 255, 255, 0.05); transition: background 0.2s; }
+
+.table6 td:first-child {
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    font-weight: 600;
+    color: var(--theme-color); 
+    width: 30%; 
+}
+
+/* --- СЕКЦИЯ 6: ИЗОБРАЖЕНИЯ (ОБНОВЛЕННАЯ) --- */
+.scp-image-container {
+    --base-width: 300px; /* Базовая ширина для выравнивания слева/справа */
+    background: #050505;
+    padding: 4px;
+    border: 1px solid #444;
+    margin-bottom: 20px;
+    z-index: 2;
+    position: relative;
+    box-sizing: border-box;
+}
+
+/* Используем переменную масштаба. Если она не задана в JS, применится 1 */
+.right-mode {
+    float: right;
+    margin: 0 0 15px 20px;
+    width: calc(var(--base-width) * var(--img-scale, 1));
+}
+.left-mode {
+    float: left;
+    margin: 0 20px 15px 0;
+    width: calc(var(--base-width) * var(--img-scale, 1));
+}
+.full-mode {
+    float: none;
+    margin: 20px auto;
+    width: 100%;
+    max-width: 800px;
+    clear: both;
+}
+
+.scp-image-container img { width: 100%; height: auto; display: block; }
+.scp-image-caption { font-family: var(--mono-font); font-size: 0.75em; color: #888; text-align: center; padding: 10px; border-top: 1px solid #222; }
+
+/* 7. ДЕКОР И АНИМАЦИЯ */
+.glitch-title { color: var(--theme-color); font-family: var(--head-font); font-size: 2em; text-align: center; display: block; margin: 20px 0; text-transform: uppercase; letter-spacing: 5px; }
+.danger-diamond { border: 2px solid var(--danger-color); background: rgba(230, 40, 60, 0.1); padding: 20px; margin: 20px 0; text-align: center; color: #ff4d4d; font-weight: bold; }
+.footnote {
+    clear: both;
+    font-size: 0.85em;
+    color: #888;
+    border-top: 1px solid #333;
+    margin-top: 40px;
+    padding-top: 10px;
+}
+
+/* ДОБАВИТЬ ЭТО: */
+.footnote p {
+    margin-bottom: 0.5em; /* Делаем отступы между абзацами в сноске чуть меньше */
+}
+.footnote p:last-child {
+    margin-bottom: 0; /* Убираем лишний отступ у последнего абзаца */
+}
+
+/* --- ССЫЛКИ [HREF] --- */
+.scp-link {
+    color: var(--theme-color);
+    text-decoration: none;
+    font-weight: bold;
+    border-bottom: 1px dashed var(--theme-color);
+
+    /* Добавляем базовое свечение */
+    text-shadow: 0 0 5px var(--theme-color);
+
+    /* Делаем цвет ярче на 40% (отлично работает с любым --theme-color) */
+    filter: brightness(1.4);
+
+    /* Плавный переход для наведения */
+    transition: all 0.2s ease-in-out;
+}
+
+/* Эффект при наведении (hover) */
+.scp-link:hover {
+    filter: brightness(1.8); /* Делаем еще ярче */
+    text-shadow: 0 0 8px var(--theme-color), 0 0 15px var(--theme-color); /* Усиливаем glow */
+    border-bottom-style: solid; /* Меняем пунктир на сплошную линию */
+}
+
+.scp-header {
+    margin: 15px 0 10px 0;
+    font-weight: bold;
+    color: var(--theme-color); /* Будут краситься в цвет текущей темы */
+}
+.scp-h1 { font-size: 1.5em; text-transform: uppercase; }
+.scp-h2 { font-size: 1.3em; border-bottom: 1px solid var(--theme-color); padding-bottom: 5px; }
+.scp-h3 { font-size: 1.1em; }
+
+.doc-end {
+    clear: both;
+    font-size: 1.5em;
+    text-align: center;
+    color: #b60000;
+    border-top: 1px solid #333;
+    margin-top: 40px;
+    padding-top: 10px;
+}
+.doc-line {
+    clear: both;
+    font-size: 1.5em;
+    text-align: center;
+    color: #b60000;
+    border-top: 1px solid #333;
+    margin-top: 40px;
+
+    /* Убираем padding сверху и добавляем высоту строки */
+    padding-top: 0;
+    line-height: 0.1em;
+}
+
+.doc-line span {
+    /* Чтобы скрыть линию за текстом, нужен фон */
+    background: #fff;
+    padding: 0 10px;
+}
+/* 8. МОБИЛЬНАЯ АДАПТАЦИЯ */
+@media (max-width: 600px) {
+    /* ИСПРАВЛЕНО: height: 20px !important убрана — она схлопывала весь блок ввода */
+    #console-area { font-size: 0.85em; }
+
+    #console-input-row { padding: 8px 12px 10px 12px; }
+
+    #console-meta { padding: 4px 12px; gap: 6px; font-size: 0.55em; }
+
+    #dossier-output { padding: 12px 15px; }
+
+    /* Таблицы не уходят за край экрана */
+    .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* Статус-бар: скрываем лишние элементы, чтобы не переполнялся */
+    #crt-statusbar .bar-sep,
+    #crt-statusbar span:not(#bar-status):not(:first-child) { display: none; }
+    #crt-statusbar { padding: 0 12px; font-size: 0.52em; }
+
+    /* На мобилках выключаем обтекание, картинка встает по центру */
+    .scp-image-container {
+        float: none !important;
+        margin: 10px auto !important;
+        /* На мобилках масштаб игнорируем, чтобы картинка не вылезла за экран */
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    .glitch-title { font-size: 1.5em; }
+
+    /* Prompt чуть меньше, чтобы влезал на узкий экран */
+    .prompt { font-size: 0.8em; margin-right: 6px; }
+
+    /* Сплэш: слова в столбик на мобилке */
+    #splash-tagline {
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+    }
+    .splash-word { font-size: 1.8em; letter-spacing: 4px; }
+    #splash-logo { width: 100px; }
+    #splash-logo-glow { width: 140px; height: 140px; }
+    #splash-sub { font-size: 0.48em; letter-spacing: 1px; text-align: center; padding: 0 20px; }
+}
+
+.center {
+    text-align: center;
+    display: block; /* Чтобы p вел себя как блок и центрировал текст внутри */
+    width: 100%;
+}
+
+.clearfix { clear: both; }
+
+/* --- АНИМАЦИЯ ПОЯВЛЕНИЯ СЛОВ --- */
+.word {
+    display: inline-block;
+    opacity: 0;
+    border-radius: 2px;
+    margin-right: 0.2em;
+}
+
+/* Вся анимация в CSS — белый блок плавно переходит в текст */
+@keyframes wordDecrypt {
+    0%   { opacity: 1; background: #fff; color: transparent; }
+    45%  { opacity: 1; background: #fff; color: transparent; }
+    100% { opacity: 1; background: transparent; color: inherit; }
+}
+
+.word.revealed {
+    animation: wordDecrypt 0.18s ease forwards;
+}
+
+/* --- ЭКРАН АВТОРИЗАЦИИ (FULLSCREEN) --- */
+#auth-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    background-color: #000;
+    display: none; /* JS управляет через flex */
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    font-family: var(--mono-font);
+    transition: opacity 0.8s ease;
+    background-image:
+        linear-gradient(rgba(0,255,65,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,65,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+}
+
+/* Блокировка прокрутки */
+body.locked { overflow: hidden; }
+
+/* Обёртка */
+#auth-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    width: 90%;
+    max-width: 520px;
+    opacity: 0;
+    animation: authFadeIn 0.4s ease forwards 0.1s;
+}
+
+@keyframes authFadeIn { to { opacity: 1; } }
+
+/* === ЗАГОЛОВОК === */
+#auth-header {
+    text-align: center;
+    border-bottom: 1px solid rgba(0,255,65,0.2);
+    padding-bottom: 16px;
+    width: 100%;
+}
+
+#auth-sigil {
+    color: var(--terminal-green);
+    font-size: 2.2em;
+    line-height: 1;
+    margin-bottom: 8px;
+    animation: sigilPulse 2s ease-in-out infinite;
+    display: block;
+}
+
+@keyframes sigilPulse {
+    0%, 100% { opacity: 1; text-shadow: 0 0 10px var(--terminal-green), 0 0 30px var(--terminal-green); }
+    50%       { opacity: 0.5; text-shadow: none; }
+}
+
+#auth-title {
+    color: var(--terminal-green);
+    font-size: 1em;
+    font-weight: 700;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    text-shadow: 0 0 8px rgba(0,255,65,0.6);
+}
+
+#auth-subtitle {
+    color: #555;
+    font-size: 0.65em;
+    letter-spacing: 2px;
+    margin-top: 4px;
+}
+
+/* === ЛОГ === */
+#auth-terminal {
+    width: 100%;
+    min-height: 110px;
+    color: var(--terminal-green);
+    font-size: 0.78em;
+    line-height: 1.6;
+    text-shadow: 0 0 4px rgba(0,255,65,0.4);
+    overflow: hidden;
+}
+
+#auth-terminal .log-line {
+    opacity: 0;
+    transform: translateX(-6px);
+    animation: logAppear 0.2s ease forwards;
+}
+
+@keyframes logAppear { to { opacity: 1; transform: translateX(0); } }
+
+/* === ПРОГРЕСС-БАР === */
+#auth-progress-wrap {
+    width: 100%;
+    display: none; /* показывается через JS */
+    flex-direction: column;
+    gap: 6px;
+}
+
+#auth-progress-track {
+    width: 100%;
+    height: 3px;
+    background: rgba(0,255,65,0.1);
+    border: 1px solid rgba(0,255,65,0.2);
+    overflow: hidden;
+}
+
+#auth-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--terminal-green);
+    box-shadow: 0 0 8px var(--terminal-green);
+    transition: width 0.08s linear;
+}
+
+#auth-progress-label {
+    font-size: 0.65em;
+    color: #555;
+    letter-spacing: 2px;
+    text-align: right;
+}
+
+/* === СКАНЕР === */
+#auth-scanner {
+    width: 180px;
+    height: 90px;
+    position: relative;
+    display: none; /* показывается через JS */
+    align-items: center;
+    justify-content: center;
+    margin: 4px 0;
+}
+
+.scan-corner {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-color: var(--terminal-green);
+    border-style: solid;
+    box-shadow: 0 0 6px var(--terminal-green);
+}
+.scan-corner.tl { top: 0; left: 0;  border-width: 2px 0 0 2px; }
+.scan-corner.tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
+.scan-corner.bl { bottom: 0; left: 0;  border-width: 0 0 2px 2px; }
+.scan-corner.br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+#scan-sweep {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--terminal-green), transparent);
+    box-shadow: 0 0 10px var(--terminal-green), 0 4px 20px rgba(0,255,65,0.3);
+    animation: scanSweep 1.2s ease-in-out infinite;
+}
+
+@keyframes scanSweep {
+    0%   { top: 0%;   opacity: 1; }
+    50%  { top: 100%; opacity: 0.8; }
+    100% { top: 0%;   opacity: 1; }
+}
+
+#scan-label {
+    color: rgba(0,255,65,0.5);
+    font-size: 0.6em;
+    letter-spacing: 3px;
+    z-index: 1;
+}
+
+/* === ФИНАЛЬНЫЙ СТАТУС === */
+#auth-final {
+    font-size: 1.1em;
+    letter-spacing: 4px;
+    font-weight: 700;
+    min-height: 1.4em;
+    text-align: center;
+}
+
+#auth-final.granted {
+    color: var(--terminal-green);
+    text-shadow: 0 0 10px var(--terminal-green), 0 0 30px var(--terminal-green);
+    animation: flashGrant 0.3s ease 2;
+}
+
+@keyframes flashGrant {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+}
+
+
+/* --- СТИЛИ MARKDOWN ДЛЯ SCP --- */
+
+/* Списки */
+.scp-list {
+    margin: 10px 0 15px 0;
+    padding-left: 25px;
+    list-style-type: square; /* Квадратные маркеры смотрятся техничнее */
+}
+.scp-list li {
+    margin-bottom: 6px;
+}
+.scp-list li::marker {
+    color: var(--theme-color); /* Маркеры цвета темы! */
+}
+
+/* Горизонтальная линия (---) */
+.scp-hr {
+    border: none;
+    border-bottom: 1px dashed var(--theme-color);
+    opacity: 0.5;
+    margin: 30px 0;
+}
+
+/* Инлайн-код `текст` */
+.scp-inline-code {
+    font-family: var(--mono-font);
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--terminal-green); /* Выделяем хакерским зеленым */
+    font-size: 0.9em;
+    border: 1px solid rgba(0, 255, 65, 0.2);
+}
+
+/* Плашка цензуры ==ДАННЫЕ УДАЛЕНЫ== */
+.scp-redacted {
+    background-color: #d1d1d1; /* Имитация плотного светлого маркера на темной бумаге */
+    color: transparent;        /* Скрываем текст */
+    padding: 0 5px;
+    border-radius: 2px;
+    user-select: none;         /* Запрещаем выделение текста */
+    transition: all 0.3s ease;
+}
+
+/* Секретный функционал: при наведении текст слегка проступает сквозь маркер */
+.scp-redacted:hover {
+    background-color: #1a1a1a;
+    color: #666;
+    border: 1px solid #333;
+    cursor: help;
+}
+
+/* Добавь это в конец terminal.css */
+
+/* Правила ТОЛЬКО для устройств без мыши (телефоны/планшеты) */
+@media (hover: none) {
+    /* Цензура просвечивает, пока пользователь держит на ней палец */
+    .scp-redacted:active {
+        background-color: #1a1a1a;
+        color: #666;
+        border: 1px solid #333;
+    }
+}
+
+/* Кнопка запроса действий у оператора */
+.operator-action-btn {
+    color: var(--terminal-green);
+    border: 1px dashed var(--terminal-green);
+    padding: 12px;
+    margin: 15px 0;
+    text-align: center;
+    cursor: pointer;
+    font-weight: bold;
+    font-family: var(--mono-font);
+    background: rgba(0, 255, 65, 0.05);
+    animation: pulse-border 2s infinite;
+}
+
+.operator-action-btn:hover, .operator-action-btn:active {
+    background: rgba(0, 255, 65, 0.15);
+}
+
+@keyframes pulse-border {
+    0% { border-color: var(--terminal-green); opacity: 1; }
+    50% { border-color: transparent; opacity: 0.6; }
+    100% { border-color: var(--terminal-green); opacity: 1; }
+}
+
+.scp-cmd-link {
+    color: var(--terminal-green);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    font-weight: bold;
+    transition: opacity 0.2s;
+    text-shadow: var(--phosphor-glow);
+}
+.scp-cmd-link:hover {
+    opacity: 0.7;
+}
+
+
+.scp-browse-link {
+    color: var(rgb(0, 200, 160));
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    font-weight: bold;
+    transition: opacity 0.2s;
+    text-shadow: var(--phosphor-glow);
+}
+.scp-browse-link:hover {
+    opacity: 0.7;
+}
+
+/* === СТАТУС-БАР === */
+#crt-statusbar {
+    height: 22px;
+    background: #010101;
+    border-top: 1px solid rgba(0, 255, 65, 0.12);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 8px;
+    font-family: var(--mono-font);
+    font-size: 0.58em;
+    color: rgba(0, 255, 65, 0.35);
+    letter-spacing: 1px;
+    flex-shrink: 0;
+}
+
+.bar-sep    { color: rgba(0, 255, 65, 0.15); }
+.bar-spacer { flex: 1; }
+
+/* === CRT ЗАГОЛОВКИ — VT323 шрифт === */
+.glitch-title,
+.scp-header,
+.scp-h1, .scp-h2, .scp-h3 {
+    font-family: 'VT323', monospace;
+    letter-spacing: 2px;
+}
+
+.scp-h1 { font-size: 2em;   text-shadow: 0 0 12px var(--theme-color); }
+.scp-h2 { font-size: 1.7em; }
+.scp-h3 { font-size: 1.4em; }
+
+.glitch-title {
+    font-size: 2.5em;
+    text-shadow: 0 0 15px var(--theme-color), 2px 2px 0 rgba(255,0,80,0.3), -2px -2px 0 rgba(0,255,200,0.3);
+}
+
+/* Мгновенный показ всех слов без анимации (при скипе) */
+.skip-reveal .word {
+    opacity: 1 !important;
+    animation: none !important;
+    background: transparent !important;
+    color: inherit !important;
+}
+
+/* Скроллбар в стиле CRT */
+#dossier-output::-webkit-scrollbar       { width: 4px; }
+#dossier-output::-webkit-scrollbar-track { background: #050505; }
+#dossier-output::-webkit-scrollbar-thumb { background: rgba(0,255,65,0.25); border-radius: 2px; }
+#dossier-output::-webkit-scrollbar-thumb:hover { background: rgba(0,255,65,0.5); }
+
+/* ============================================
+   SCP SPLASH SCREEN  —  ПЕРЕРАБОТАННАЯ ВЕРСИЯ
+   Ключевое исправление: z-index 10000 > auth-overlay (9999),
+   иначе сплэш скрыт за оверлеем авторизации!
+   ============================================ */
+#scp-splash {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 10000; /* ← ИСПРАВЛЕНО: было 9990, должно быть > 9999 (auth-overlay) */
+    display: none;  /* JS переключает на flex */
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 36px;
+    font-family: var(--mono-font);
+    background-image:
+        linear-gradient(rgba(0,255,65,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,65,0.025) 1px, transparent 1px);
+    background-size: 40px 40px;
+}
+
+/* Обёртка логотипа */
+#splash-logo-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Размытое радиальное свечение ЗА логотипом */
+#splash-logo-glow {
+    position: absolute;
+    width: 240px;
+    height: 240px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(0,255,65,0.22) 0%, transparent 68%);
+    filter: blur(28px);
+    opacity: 0;
+    transform: scale(0.35);
+    pointer-events: none;
+}
+
+/* ── Сам SVG-логотип ── */
+#splash-logo {
+    width: 160px;
+    height: 160px;
+    position: relative;
+    z-index: 1;
+    overflow: visible; /* стрелки в начале анимации выходят за bounds */
+    /* Базовое зелёное свечение появится когда части лого проявятся */
+    filter: drop-shadow(0 0 8px rgba(0,255,65,0.45));
+}
+
+/* ──────────────────────────────────────────────
+   СТАРТОВОЕ СОСТОЯНИЕ: все части SVG невидимы.
+   transform-origin = центр логотипа (67.7 71.5)
+   в координатах SVG-пространства (viewBox 135×135)
+   ────────────────────────────────────────────── */
+#splash-logo .scp-circle,
+#splash-logo .scp-arrow-1,
+#splash-logo .scp-arrow-2,
+#splash-logo .scp-arrow-3,
+#splash-logo .scp-ring {
+    opacity: 0;
+    transform-origin: 67.7px 71.5px; /* центр логотипа в SVG-координатах */
+}
+
+/* ══════════════════════════════════════════════
+   KEYFRAMES  —  три фазы сборки логотипа
+   ══════════════════════════════════════════════ */
+
+/* ── Фаза 1: Круг вырастает из точки ── */
+@keyframes scpCircleIn {
+    0%   { opacity: 0; transform: scale(0.05); }
+    50%  { opacity: 1; transform: scale(1.14); }   /* небольшое "перепрыгивание" */
+    70%  { transform: scale(0.94); }
+    85%  { transform: scale(1.05); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+/* ── Фаза 2: Стрелки — прилетают с большого расстояния, вращаясь
+      Каждая группа <g> вращается вокруг центра лого (-95° → 0°).
+      Путь внутри группы уже стоит на своём угле (0°/120°/240°),
+      поэтому одна и та же анимация корректно работает для всех трёх. ── */
+@keyframes scpArrowIn {
+    0%   { opacity: 0; transform: rotate(-95deg) scale(3.4); }
+    12%  { opacity: 0.9; }
+    65%  { transform: rotate(8deg)  scale(0.95); }  /* пролетают чуть дальше */
+    82%  { transform: rotate(-3deg) scale(1.02); }  /* отскок назад */
+    100% { opacity: 1; transform: rotate(0deg)  scale(1); }
+}
+
+/* ── Фаза 3: Кольцо раскручивается из сжатого состояния ── */
+@keyframes scpRingIn {
+    0%   { opacity: 0; transform: rotate(-172deg) scale(0.5); }
+    15%  { opacity: 0.6; }
+    24%  { opacity: 1; }
+    70%  { transform: rotate(10deg) scale(1.03); }  /* переборщило */
+    86%  { transform: rotate(-4deg) scale(0.99); }  /* коррекция */
+    100% { opacity: 1; transform: rotate(0deg)  scale(1); }
+}
+
+/* ── Пульсирующее свечение собранного лого ── */
+@keyframes scpLogoPulse {
+    0%, 100% { filter: drop-shadow(0 0 10px rgba(0,255,65,0.55)); }
+    50%       { filter: drop-shadow(0 0 24px rgba(0,255,65,1.0))
+                        drop-shadow(0 0 48px rgba(0,255,65,0.32)); }
+}
+
+/* ── Фоновое свечение за лого ── */
+@keyframes scpGlowAppear {
+    0%   { opacity: 0; transform: scale(0.35); }
+    55%  { opacity: 1; transform: scale(1.18); }
+    100% { opacity: 0.8; transform: scale(1); }
+}
+
+/* ══════════════════════════════════════════════
+   ЗАПУСК АНИМАЦИИ по классу .animate
+   JS добавляет его на #splash-logo и #splash-logo-glow
+   ══════════════════════════════════════════════ */
+
+/* Пульсация + начальное свечение на самом SVG-элементе */
+#splash-logo.animate {
+    animation: scpLogoPulse 2.5s ease-in-out 1.5s infinite;
+}
+
+/* Фоновое свечение (JS добавляет .animate на #splash-logo-glow) */
+#splash-logo-glow.animate {
+    animation: scpGlowAppear 1.1s cubic-bezier(0.22, 1, 0.36, 1) 0.25s forwards;
+}
+
+/* Фаза 1 — круг */
+#splash-logo.animate .scp-circle {
+    animation: scpCircleIn 0.72s ease-out 0s forwards;
+}
+
+/* Фаза 2 — стрелки (стаггер 140 мс) */
+#splash-logo.animate .scp-arrow-1 {
+    animation: scpArrowIn 0.88s cubic-bezier(0.18, 1.5, 0.36, 1) 0.30s forwards;
+}
+#splash-logo.animate .scp-arrow-2 {
+    animation: scpArrowIn 0.88s cubic-bezier(0.18, 1.5, 0.36, 1) 0.44s forwards;
+}
+#splash-logo.animate .scp-arrow-3 {
+    animation: scpArrowIn 0.88s cubic-bezier(0.18, 1.5, 0.36, 1) 0.58s forwards;
+}
+
+/* Фаза 3 — кольцо (стартует вместе со стрелками) */
+#splash-logo.animate .scp-ring {
+    animation: scpRingIn 1.08s cubic-bezier(0.16, 1.3, 0.36, 1) 0.36s forwards;
+}
+
+/* ══════════════════════════════════════════════
+   ТЕКСТ "SECURE. CONTAIN. PROTECT."
+   ══════════════════════════════════════════════ */
+#splash-tagline {
+    display: flex;
+    gap: 24px;
+    align-items: baseline;
+}
+
+.splash-word {
+    font-family: 'VT323', monospace;
+    font-size: 2.4em;
+    letter-spacing: 5px;
+    color: #fff;
+    opacity: 0;
+    transform: translateY(12px);
+    text-shadow: 0 0 10px rgba(255,255,255,0.3);
+}
+
+@keyframes wordSlideIn {
+    0%   { opacity: 0; transform: translateY(12px); }
+    40%  { opacity: 1; transform: translateY(-3px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+#sw-secure  { color: #aaa; }
+#sw-contain { color: #ccc; }
+#sw-protect {
+    color: var(--terminal-green);
+    text-shadow: 0 0 15px rgba(0,255,65,0.8), 0 0 30px rgba(0,255,65,0.4);
+    letter-spacing: 6px;
+}
+
+.splash-word.show {
+    animation: wordSlideIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Подпись снизу */
+#splash-sub {
+    font-size: 0.6em;
+    letter-spacing: 3px;
+    color: rgba(255,255,255,0.15);
+    opacity: 0;
+    transition: opacity 0.6s ease;
+}
+
+#splash-sub.show { opacity: 1; }
+
+/* ══════════════════════════════════════════════
+   FADE-OUT сплэша
+   ══════════════════════════════════════════════ */
+@keyframes splashFadeOut {
+    0%   { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+#scp-splash.fade-out {
+    animation: splashFadeOut 0.9s ease forwards;
+    pointer-events: none;
+}

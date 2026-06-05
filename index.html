@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TERMINAL O5-COMMAND</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=IBM+Plex+Sans:wght@400;600;700&family=Inter:wght@400;700&family=VT323&display=swap">
+    <link rel="stylesheet" type='text/css' media='screen' href="css/terminal.css">
+    <link rel="stylesheet" type='text/css' media='screen' href="css/windows.css">
+    <link rel="stylesheet" type='text/css' media='screen' href="css/settings.css">
+</head>
+<body class="locked">
+<div id="beta-badge" aria-hidden="true">▸ BETA-BRANCH ◂</div>
+<!-- CRT Эффекты: scanlines + vignette поверх всего -->
+<div id="crt-fx" aria-hidden="true">
+    <div id="crt-scanlines"></div>
+    <div id="crt-vignette"></div>
+</div>
+
+<!-- SCP Сплэш-заставка (появляется после авторизации) -->
+<div id="scp-splash" aria-hidden="true">
+    <div id="splash-logo-wrap">
+        <div id="splash-logo-glow"></div>
+
+        <!--
+            INLINE SVG ЛОГОТИПА — заменяет <img>.
+            Каждая часть в отдельной группе <g> для покомпонентной анимации.
+            Порядок анимации: .scp-circle → .scp-arrow-* → .scp-ring
+        -->
+        <svg id="splash-logo"
+             viewBox="0 0 135 135"
+             xmlns="http://www.w3.org/2000/svg"
+             aria-label="SCP Foundation">
+
+            <!-- 1. Внутренний круг (появляется первым) -->
+            <g class="scp-circle">
+                <circle cx="67.7" cy="71.5" r="33"
+                        fill="none" stroke="white" stroke-width="6"/>
+            </g>
+
+            <!-- 2а. Стрелка 1 (базовое положение, 0°) -->
+            <g class="scp-arrow-1">
+                <path d="m64.7 30.6v24h-5.08l8.08 14 8.08-14h-5.08l-.000265-24h-5.99"
+                      fill="white"/>
+            </g>
+
+            <!-- 2б. Стрелка 2 (повёрнута на 120°) -->
+            <g class="scp-arrow-2">
+                <path transform="rotate(120 67.7 71.5)"
+                      d="m64.7 30.6v24h-5.08l8.08 14 8.08-14h-5.08l-.000265-24h-5.99"
+                      fill="white"/>
+            </g>
+
+            <!-- 2в. Стрелка 3 (повёрнута на 240°) -->
+            <g class="scp-arrow-3">
+                <path transform="rotate(240 67.7 71.5)"
+                      d="m64.7 30.6v24h-5.08l8.08 14 8.08-14h-5.08l-.000265-24h-5.99"
+                      fill="white"/>
+            </g>
+
+            <!-- 3. Внешнее кольцо с выступами (появляется последним, раскручиваясь) -->
+            <g class="scp-ring">
+                <path d="m51.9 11.9h31.7l3.07 11.4.944.391c19.4 8.03 32 26.9 32 47.9 0 2.26-.149 4.53-.445 6.77l-.133 1.01 8.37 8.37-15.8 27.4-11.4-3.06-.809.623c-9.06 6.95-20.2 10.7-31.6 10.7-11.4 6e-5-22.5-3.77-31.6-10.7l-.81-.623-11.4 3.06-15.8-27.4 8.37-8.37-.133-1.01c-.296-2.25-.445-4.51-.445-6.77.000141-21 12.6-39.9 32-47.9l.944-.391z"
+                      fill="none" stroke="white" stroke-width="4"/>
+            </g>
+        </svg>
+    </div>
+
+    <div id="splash-tagline">
+        <span class="splash-word" id="sw-secure">SECURE.</span>
+        <span class="splash-word" id="sw-contain">CONTAIN.</span>
+        <span class="splash-word" id="sw-protect">PROTECT.</span>
+    </div>
+    <div id="splash-sub" style="text-align: center">
+        <p>SCP FOUNDATION'S DOSSIER HUB</p>
+        <p>[BY IZZZI_]</p>
+    </div>
+</div>
+
+<div id="auth-overlay">
+    <div id="auth-wrap">
+        <div id="auth-header">
+            <div id="auth-sigil">⬡</div>
+            <div id="auth-title">SCIPNET // O5-TERMINAL</div>
+            <div id="auth-subtitle">ULTRAVIOLET CLEARANCE ACCESS POINT</div>
+        </div>
+        <div id="auth-terminal"></div>
+        <div id="auth-progress-wrap">
+            <div id="auth-progress-track">
+                <div id="auth-progress-bar"></div>
+            </div>
+            <div id="auth-progress-label">INITIALIZING...</div>
+        </div>
+        <div id="auth-scanner">
+            <div class="scan-corner tl"></div>
+            <div class="scan-corner tr"></div>
+            <div class="scan-corner bl"></div>
+            <div class="scan-corner br"></div>
+            <div id="scan-sweep"></div>
+            <div id="scan-label">RETINA SCAN</div>
+        </div>
+        <div id="auth-final"></div>
+    </div>
+</div>
+
+<div id="container">
+
+    <!-- Строка ввода -->
+    <div id="console-area">
+        <div id="console-meta">
+            <span class="meta-tag">SYS:OK</span>
+            <span class="meta-tag">CONN:SECURE</span>
+            <span class="meta-tag">LVL:O5</span>
+            <span class="meta-spacer"></span>
+            <span class="meta-clock" id="meta-clock">00:00:00</span>
+        </div>
+        <div id="console-input-row">
+            <span class="prompt">O5@SCIPNET:~$</span>
+            <div style="position: relative; flex: 1; display: flex; align-items: center;">
+                <span id="cmd-suggestion" style="position: absolute; left: 0; color: #333; pointer-events: none; font-family: var(--mono-font); font-size: 16px;"></span>
+                <input type="text" id="cmd-input" autocomplete="off" spellcheck="false" style="position: relative; z-index: 2; background: transparent; width: 100%; border: none; color: #e8e8e8; font-family: var(--mono-font); font-size: 16px; outline: none;">
+            </div>
+        </div>
+    </div>
+
+    <!-- Область вывода -->
+    <div id="dossier-output">
+        <div style="text-align:center; color: #222;"></div>
+    </div>
+
+    <!-- Статус-бар снизу -->
+    <div id="crt-statusbar">
+        <span>SCIPNET v4.1.9</span>
+        <span class="bar-sep">|</span>
+        <span>FOUNDATION SECURE INTRANET</span>
+        <span class="bar-sep">|</span>
+        <span id="bar-status">READY</span>
+        <span class="bar-spacer"></span>
+        <span>MEM: <span id="bar-mem">—</span></span>
+        <span class="bar-sep">|</span>
+        <span>THREAT: <span style="color:var(--terminal-green)">NONE</span></span>
+    </div>
+
+</div>
+
+<script src="js/terminal/cmd_upload.js"></script>
+<script src="js/terminal/cmd_get.js"></script>
+<script src="js/terminal/cmd_echo.js"></script>
+<script src="js/terminal/cmd_browse.js"></script>
+<script src="js/terminal/renderer.js"></script>
+<script src="js/terminal/commands.js"></script>
+<script src="js/audio-handler.js"></script>
+<script src="js/window-manager.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/terminal/main.js"></script>
+
+<!-- Часики и мем-бар -->
+<script>
+    (function() {
+        function tick() {
+            const el = document.getElementById('meta-clock');
+            if (el) el.textContent = new Date().toLocaleTimeString('en-GB');
+        }
+        tick();
+        setInterval(tick, 1000);
+
+        // Случайная "память" для атмосферы
+        const memEl = document.getElementById('bar-mem');
+        if (memEl) memEl.textContent = (Math.floor(Math.random() * 20) + 78) + '%';
+    })();
+</script>
+</body>
+</html>

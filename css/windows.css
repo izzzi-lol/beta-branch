@@ -1,0 +1,453 @@
+/* ============================================================
+   LYOKO WINDOW MANAGER — Code Lyoko Supercomputer aesthetic
+   Balanced green palette
+   ============================================================ */
+
+/* Слой окон поверх терминала, под auth/splash */
+#wm-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 500;
+}
+
+/* ── Одно окно ─────────────────────────────────────────────── */
+.lyoko-window {
+    position: absolute;
+    pointer-events: all;
+    display: flex;
+    flex-direction: column;
+    min-width: 280px;
+    min-height: 0;
+
+    background:
+        linear-gradient(rgba(0,180,80,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,180,80,0.025) 1px, transparent 1px),
+        rgba(3, 12, 7, 0.97);
+    background-size: 24px 24px, 24px 24px, auto;
+
+    border: 1px solid rgba(0, 200, 100, 0.35);
+    box-shadow:
+        0 0 0 1px rgba(0, 200, 100, 0.08),
+        0 0 24px rgba(0, 200, 100, 0.12),
+        0 8px 40px rgba(0, 0, 0, 0.7),
+        inset 0 0 40px rgba(0, 200, 100, 0.03);
+
+    font-family: 'JetBrains Mono', monospace;
+    color: #aee8c4;
+    user-select: none;
+
+    will-change: transform, opacity;
+    transition: box-shadow 0.2s;
+}
+
+.lyoko-window:focus-within,
+.lyoko-window.active {
+    border-color: rgba(0, 200, 100, 0.65);
+    box-shadow:
+        0 0 0 1px rgba(0, 200, 100, 0.15),
+        0 0 32px rgba(0, 200, 100, 0.22),
+        0 12px 50px rgba(0, 0, 0, 0.75),
+        inset 0 0 60px rgba(0, 200, 100, 0.05);
+}
+
+/* ── Flash: яркий белый прямоугольник при появлении/исчезновении ─── */
+/* Дочерние элементы скрыты — видна только светящаяся рамка.         */
+
+/* Вспышка при ОТКРЫТИИ: яркая → нормальное окно */
+@keyframes lyokoFlashOpen {
+    0%   { background: #edfff4;
+        box-shadow: 0 0 0 3px rgba(220,255,240,0.9),
+        0 0 80px rgba(80,220,140,0.6); }
+    100% { background: rgba(4,12,24,0.97);
+        box-shadow: 0 0 24px rgba(0,200,255,0.12); }
+}
+
+/* Вспышка при ЗАКРЫТИИ: нормальное → яркая → исчезает */
+@keyframes lyokoFlashClose {
+    0%   { background: rgba(4,12,24,0.97); opacity: 1; }
+    50%  { background: #edfff4;
+        box-shadow: 0 0 0 3px rgba(220,255,240,0.9),
+        0 0 80px rgba(80,220,140,0.6);
+        opacity: 1; }
+    100% { background: #edfff4; opacity: 0; border-color: #ffffff; }
+}
+
+.lyoko-window.wm-flash-in {
+    animation: lyokoFlashOpen 0.45s ease-out forwards;
+}
+
+.lyoko-window.wm-flash-out {
+    animation: lyokoFlashClose 0.3s ease-in forwards;
+    pointer-events: none;
+}
+
+/* Скрываем всё содержимое окна во время вспышки */
+.lyoko-window.wm-flash-in > *,
+.lyoko-window.wm-flash-in::before,
+.lyoko-window.wm-flash-in::after {
+    opacity: 0 !important;
+    transition: none !important;
+}
+
+/* Скрываем всё содержимое окна во время вспышки */
+.lyoko-window.wm-flash-out > *,
+.lyoko-window.wm-flash-out::before,
+.lyoko-window.wm-flash-out::after {
+    opacity: 0 !important;
+    transition: none !important;
+}
+
+/* ── Тайтл-бар ─────────────────────────────────────────────── */
+.lyoko-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px 7px 14px;
+    background: linear-gradient(
+        90deg,
+        rgba(0, 200, 100, 0.12) 0%,
+        rgba(0, 160, 80,  0.06) 60%,
+        transparent 100%
+    );
+    border-bottom: 1px solid rgba(0, 200, 100, 0.2);
+    cursor: grab;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.lyoko-titlebar:active { cursor: grabbing; }
+
+/* Мигающий индикатор слева */
+.lyoko-titlebar::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #00bb58;
+    box-shadow: 0 0 6px #00bb58, 0 0 12px #00bb58;
+    flex-shrink: 0;
+    animation: lyokoBlink 2s ease-in-out infinite;
+}
+
+@keyframes lyokoBlink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+}
+
+.lyoko-title {
+    flex: 1;
+    font-size: 0.7em;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: #6ddc9c;
+    text-shadow: 0 0 8px rgba(0, 200, 100, 0.6);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── Кнопки тайтл-бара ─────────────────────────────────────── */
+.lyoko-btn {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    background: rgba(0, 160, 80, 0.08);
+    border: 1px solid rgba(0, 200, 100, 0.25);
+    color: rgba(0, 200, 100, 0.7);
+    font-size: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px);
+    line-height: 1;
+}
+
+.lyoko-btn:hover {
+    background: rgba(0, 200, 100, 0.2);
+    border-color: rgba(0, 180, 100, 0.6);
+    color: #fff;
+    box-shadow: 0 0 8px rgba(0, 200, 100, 0.4);
+}
+
+.lyoko-btn.close:hover {
+    background: rgba(255, 50, 80, 0.2);
+    border-color: rgba(255, 50, 80, 0.6);
+    color: #ff5060;
+    box-shadow: 0 0 8px rgba(255, 50, 80, 0.4);
+}
+
+/* ── Content wrapper: grid-trick для slide-анимации ────────── */
+/*                                                               */
+/*  grid-template-rows: 1fr  →  контент виден (естественная в.) */
+/*  grid-template-rows: 0fr  →  контент схлопнут в 0            */
+/*  overflow: hidden          →  обрезает контент во время анима.*/
+/*                                                               */
+/*  ВАЖНО: .lyoko-content должен иметь min-height:0 —           */
+/*  иначе 0fr не сработает (grid не может сжать элемент ниже    */
+/*  его min-height по умолчанию = auto).                         */
+.lyoko-content-wrapper {
+    display: grid;
+    grid-template-rows: 1fr;
+    overflow: hidden;
+    transition: grid-template-rows 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lyoko-content-wrapper.collapsed {
+    grid-template-rows: 0fr;
+}
+
+/* Grid-trick схлопывает content area до 0, но padding — часть box model и
+   0fr его не убирает. Без этого правила у окон с padding на .lyoko-content
+   (settings и др.) остаётся щель высотой padding-top + padding-bottom.
+   Browse не затронут: он сам обнуляет padding через cssText.              */
+.lyoko-content-wrapper.collapsed .lyoko-content {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+/* ── Контент окна ───────────────────────────────────────────── */
+.lyoko-content {
+    min-height: 0;          /* обязательно для 0fr grid-trick */
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 14px 16px;
+    font-size: 0.82em;
+    line-height: 1.6;
+    color: #9ed4b4;
+    position: relative;
+    user-select: text;
+
+    /* Анимация сворачивания/разворачивания через max-height.
+       Transition живёт здесь — JS не должен его перетирать. */
+    transition: max-height 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Scanline поверх контента */
+.lyoko-content::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 3px,
+        rgba(0, 0, 0, 0.12) 3px,
+        rgba(0, 0, 0, 0.12) 4px
+    );
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* Скроллбар */
+.lyoko-content::-webkit-scrollbar       { width: 3px; }
+.lyoko-content::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
+.lyoko-content::-webkit-scrollbar-thumb { background: rgba(0,180,80,0.4); border-radius: 2px; }
+
+/* ── Угловые декор-уголки ───────────────────────────────────── */
+.lyoko-window::before,
+.lyoko-window::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-color: rgba(0, 200, 100, 0.8);
+    border-style: solid;
+    pointer-events: none;
+    z-index: 2;
+}
+.lyoko-window::before { bottom: 6px; left: 6px;  border-width: 0 0 1px 1px; }
+.lyoko-window::after  { bottom: 6px; right: 6px; border-width: 0 1px 1px 0; }
+
+/* ── Нижняя строка статуса ──────────────────────────────────── */
+.lyoko-statusbar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 12px;
+    border-top: 1px solid rgba(0, 200, 100, 0.12);
+    background: rgba(0, 160, 80, 0.04);
+    font-size: 0.58em;
+    letter-spacing: 1.5px;
+    color: rgba(0, 200, 100, 0.35);
+}
+
+/* ── Оверлей затемнения (опционально) ───────────────────────── */
+#wm-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(2px);
+    z-index: 499;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+#wm-backdrop.visible {
+    opacity: 1;
+    pointer-events: all;
+}
+
+
+/* ── Хэндлы ресайза (десктоп) ───────────────────────────────── */
+.lyoko-rh {
+    position: absolute;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.18s, background 0.18s;
+}
+
+/* Показываем хэндлы при наведении на окно */
+.lyoko-window:hover .lyoko-rh { opacity: 1; }
+
+/* Нижний край (↕) */
+.lyoko-rh-s {
+    bottom: 0;
+    left: 14px;
+    right: 14px;
+    height: 5px;
+    cursor: ns-resize;
+}
+
+/* Правый край (↔) */
+.lyoko-rh-e {
+    right: 0;
+    top: 14px;
+    bottom: 14px;
+    width: 5px;
+    cursor: ew-resize;
+}
+
+/* Угол ↘ */
+.lyoko-rh-se {
+    bottom: 0;
+    right: 0;
+    width: 14px;
+    height: 14px;
+    cursor: nwse-resize;
+}
+
+/* Подсветка при наведении на сам хэндл */
+.lyoko-rh:hover,
+.lyoko-rh:active {
+    background: rgba(0, 200, 100, 0.25);
+    box-shadow: 0 0 6px rgba(0, 200, 100, 0.35);
+}
+
+/* ============================================================
+   МОБАЙЛ: полноэкранные окна + tab-strip навигация
+   (hover: none), (pointer: coarse) — сенсорные устройства
+   ============================================================ */
+
+@media (hover: none), (pointer: coarse) {
+
+    /* Окно: полный экран; position/size задаётся через JS (_fitMobile) */
+    .lyoko-window {
+        min-width: 0 !important;
+        border-radius: 0;
+    }
+
+    /* Угловые декор-уголки скрываем — они за краем экрана */
+    .lyoko-window::before,
+    .lyoko-window::after {
+        display: none;
+    }
+
+    /* Тайтл-бар: tab-strip */
+    .lyoko-titlebar {
+        padding: 0 6px 0 0;
+        gap: 0;
+        cursor: default;
+        min-height: 40px;
+        align-items: stretch;
+    }
+
+    /* Мигающая точка скрыта — место занимает tab-strip */
+    .lyoko-titlebar::before {
+        display: none;
+    }
+
+    /* Скролл-стрип вкладок */
+    .lyoko-tab-strip {
+        flex: 1;
+        display: flex;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+        scroll-behavior: smooth;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .lyoko-tab-strip::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Одна вкладка */
+    .lyoko-tab {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        font-size: 0.62em;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: rgba(0, 200, 100, 0.38);
+        border-bottom: 2px solid transparent;
+        border-right: 1px solid rgba(0, 200, 100, 0.1);
+        cursor: pointer;
+        white-space: nowrap;
+        transition: color 0.15s, border-color 0.15s, background 0.15s;
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+    }
+
+    .lyoko-tab:last-child {
+        border-right: none;
+    }
+
+    /* Активная вкладка */
+    .lyoko-tab.active {
+        color: #6ddc9c;
+        border-bottom-color: #00bb58;
+        text-shadow: 0 0 8px rgba(0, 200, 100, 0.5);
+        background: rgba(0, 200, 100, 0.04);
+    }
+
+    /* Тап-подсветка для неактивных */
+    .lyoko-tab:active:not(.active) {
+        background: rgba(0, 200, 100, 0.08);
+    }
+
+    /* Content wrapper: заполняет оставшуюся высоту */
+    .lyoko-content-wrapper {
+        flex: 1;
+        min-height: 0;
+    }
+
+    /* Контент: полная прокрутка, без ограничения высоты */
+    .lyoko-content {
+        max-height: none !important;
+        -webkit-overflow-scrolling: touch;
+        font-size: 0.88em;
+        padding: 12px 14px;
+    }
+
+    /* Кнопка resize на мобайле не нужна */
+    .lyoko-btn.resize {
+        display: none;
+    }
+
+    /* Кнопка close: чуть крупнее под палец */
+    .lyoko-btn.close {
+        width: 34px;
+        height: 34px;
+        font-size: 12px;
+        align-self: center;
+        flex-shrink: 0;
+        margin: 3px 0;
+    }
+}

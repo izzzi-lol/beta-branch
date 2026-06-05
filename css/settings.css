@@ -1,0 +1,284 @@
+/* ============================================================
+   LYOKO SETTINGS MENU — интерактивное меню настроек
+   ============================================================ */
+
+/* ── Обёртка меню ───────────────────────────────────────────── */
+.lk-settings {
+    display: flex;
+    height: 100%;
+    min-height: 320px;
+    gap: 0;
+}
+
+/* ── Боковая навигация ──────────────────────────────────────── */
+.lk-nav {
+    width: 130px;
+    flex-shrink: 0;
+    border-right: 1px solid rgba(0, 200, 255, 0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 6px;
+}
+
+.lk-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    font-size: 0.68em;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(0, 200, 255, 0.45);
+    cursor: pointer;
+    transition: all 0.15s;
+    clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%, 0 4px);
+    position: relative;
+}
+
+.lk-nav-item:hover {
+    color: rgba(0, 220, 255, 0.9);
+    background: rgba(0, 200, 255, 0.07);
+}
+
+.lk-nav-item.active {
+    color: #00ddff;
+    background: rgba(0, 200, 255, 0.12);
+    text-shadow: 0 0 8px rgba(0, 200, 255, 0.6);
+}
+
+/* Полоска слева у активного пункта */
+.lk-nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 4px; bottom: 4px;
+    width: 2px;
+    background: #00ccff;
+    box-shadow: 0 0 6px #00ccff;
+}
+
+.lk-nav-icon { font-size: 0.9em; opacity: 0.8; }
+
+/* ── Панели контента ────────────────────────────────────────── */
+.lk-panels {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+.lk-panel {
+    position: absolute;
+    inset: 0;
+    padding: 12px 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(8px);
+    transition: opacity 0.2s, transform 0.2s;
+}
+
+.lk-panel.active {
+    opacity: 1;
+    pointer-events: all;
+    transform: translateX(0);
+}
+
+/* ── Группа настроек ────────────────────────────────────────── */
+.lk-group-label {
+    font-size: 0.58em;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: rgba(0, 200, 255, 0.35);
+    border-bottom: 1px solid rgba(0, 200, 255, 0.1);
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+}
+
+.lk-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 28px;
+}
+
+.lk-label {
+    font-size: 0.7em;
+    letter-spacing: 1px;
+    color: #8dc8e8;
+    flex: 1;
+}
+
+.lk-hint {
+    font-size: 0.6em;
+    color: rgba(0, 200, 255, 0.3);
+    margin-top: 2px;
+    letter-spacing: 0.5px;
+}
+
+/* ── Toggle ─────────────────────────────────────────────────── */
+.lk-toggle {
+    width: 36px;
+    height: 18px;
+    background: rgba(0, 200, 255, 0.08);
+    border: 1px solid rgba(0, 200, 255, 0.25);
+    border-radius: 0;
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.2s;
+    clip-path: polygon(3px 0, 100% 0, 100% 100%, 0 100%, 0 3px);
+}
+
+.lk-toggle::after {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 10px;
+    height: 10px;
+    background: rgba(0, 200, 255, 0.4);
+    transition: all 0.2s;
+}
+
+.lk-toggle.on {
+    background: rgba(0, 200, 255, 0.18);
+    border-color: rgba(0, 220, 255, 0.6);
+    box-shadow: 0 0 8px rgba(0, 200, 255, 0.3);
+}
+
+.lk-toggle.on::after {
+    left: calc(100% - 13px);
+    background: #00ccff;
+    box-shadow: 0 0 6px #00ccff;
+}
+
+/* ── Слайдер ────────────────────────────────────────────────── */
+.lk-slider-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    max-width: 160px;
+}
+
+.lk-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1;
+    height: 3px;
+    background: rgba(0, 200, 255, 0.15);
+    outline: none;
+    border: none;
+    cursor: pointer;
+}
+
+.lk-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #00ccff;
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); /* ромб */
+    box-shadow: 0 0 6px #00ccff;
+    cursor: pointer;
+}
+
+.lk-slider-val {
+    font-size: 0.65em;
+    color: #00ccff;
+    min-width: 28px;
+    text-align: right;
+    letter-spacing: 1px;
+}
+
+/* ── Select ─────────────────────────────────────────────────── */
+.lk-select {
+    background: rgba(0, 180, 255, 0.06);
+    border: 1px solid rgba(0, 200, 255, 0.25);
+    color: #7dd8ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68em;
+    padding: 4px 8px;
+    outline: none;
+    cursor: pointer;
+    letter-spacing: 1px;
+    clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%, 0 4px);
+}
+
+.lk-select:focus {
+    border-color: rgba(0, 220, 255, 0.6);
+    box-shadow: 0 0 8px rgba(0, 200, 255, 0.25);
+}
+
+.lk-select option {
+    background: #040c18;
+    color: #7dd8ff;
+}
+
+/* ── Кнопка действия ────────────────────────────────────────── */
+.lk-btn {
+    background: rgba(0, 180, 255, 0.06);
+    border: 1px solid rgba(0, 200, 255, 0.3);
+    color: rgba(0, 200, 255, 0.8);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65em;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+}
+
+.lk-btn:hover {
+    background: rgba(0, 200, 255, 0.15);
+    border-color: rgba(0, 220, 255, 0.6);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(0, 200, 255, 0.3);
+}
+
+.lk-btn.danger {
+    border-color: rgba(255, 50, 80, 0.3);
+    color: rgba(255, 80, 100, 0.8);
+}
+.lk-btn.danger:hover {
+    background: rgba(255, 50, 80, 0.15);
+    border-color: rgba(255, 50, 80, 0.7);
+    color: #ff6070;
+    box-shadow: 0 0 10px rgba(255, 50, 80, 0.3);
+}
+
+/* ── Цветовые свотчи ────────────────────────────────────────── */
+.lk-swatches {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.lk-swatch {
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.lk-swatch:hover { transform: scale(1.15); }
+.lk-swatch.selected {
+    border-color: #fff;
+    box-shadow: 0 0 8px currentColor;
+}
+
+/* ── Цветной инпут ──────────────────────────────────────────── */
+.lk-color-input {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid rgba(0,200,255,0.3);
+    background: none;
+    cursor: pointer;
+    clip-path: polygon(3px 0, 100% 0, 100% 100%, 0 100%, 0 3px);
+}
