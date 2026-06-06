@@ -8,7 +8,7 @@ const renderer = new StepRenderer();
 
 
 //ПОЯВЛЯЕТСЯ ЛИ ПЛАШКА BETA-BRANCH ИЛИ НЕТ
-let BetaBrach = false;
+const BetaBranch = true;
 
 function introDelay(ms) {
     return Promise.race([
@@ -205,7 +205,7 @@ async function startAuth() {
 }
 
 window.onload = async () => {
-    document.getElementById('beta-badge').ariaHidden = !BetaBrach;
+    document.getElementById('beta-badge').ariaDisabled = BetaBranch;
     AudioHandler.init();
     TerminalAPI.lockInput();
     let hasSeenIntro = localStorage.getItem('has_seen_intro');

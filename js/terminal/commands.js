@@ -79,7 +79,7 @@ const CommandHandler = {
             </center>
             <div style="text-align:center;">
                 <p>SCP FOUNDATION'S DOSSIER HUB</p>
-                <p>[BETA BRANCH]</p>
+                ${BetaBranch ? `<p>[BETA BRANCH]</p>` : ``}
                 <h1>CHANGELOGS</h1>
             </div>
             <hr style="border-color:#00EE00">
