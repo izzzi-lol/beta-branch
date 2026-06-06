@@ -1,5 +1,5 @@
 // Глобальный список для автодополнения в main.js
-const COMMAND_LIST = ['get', 'help', 'clear', 'echo', 'reboot', 'upload','settings','browse','changelogs'];
+const COMMAND_LIST = ['get', 'help', 'clear', 'echo', 'reboot', 'upload','settings','browse','changelogs','plugin'];
 
 const CommandHandler = {
     async execute(rawInput, terminal) {
@@ -71,7 +71,6 @@ const CommandHandler = {
                 break;
             case 'changelogs':
                     const content = await StepRenderer.fromFile('./changelogs.txt', '', false);
-
                     WindowManager.open('CHANGELOGS', 'CHANGELOGS', `
         <body>
             <center>
@@ -94,6 +93,9 @@ const CommandHandler = {
                         isResizable: false
                     });
                     break;
+            case 'plugin':
+                await CmdPlugin.execute(args, terminal);
+                break;
             default:
                 if (cmd !== '') {
                     terminal.printError(`КОМАНДА НЕ РАСПОЗНАНА: ${cmd}. Введите help для списка команд.`);

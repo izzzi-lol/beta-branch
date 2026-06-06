@@ -1,6 +1,6 @@
 !COM 06.06.2026_RE
 
-[COLORCODES] Mainpage=#4682B4; Quotes=#4682B4; Tables=#4682B4
+[COLORCODES] Mainpage=#00FF41; Quotes=#00FF41; Tables=#00FF41
 
 [H1] [CENTER] Переработка и улучшения
 

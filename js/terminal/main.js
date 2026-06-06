@@ -101,6 +101,11 @@ async function showSplash() {
     input.focus();
     showChangelogs();
     await handleUrlParams();
+
+    //Удаляем элементы, чтобы не висели, как мусор =)
+    splash.remove();
+    authOverlay.remove();
+
 }
 
 // --- ЛОГИКА АВТОРИЗАЦИИ ---
@@ -217,8 +222,12 @@ window.onload = async () => {
         document.body.classList.remove('locked');
         input.focus();
         showChangelogs();
-    }
 
+        //Удаляем элементы, чтобы не висели, как мусор =)
+        authOverlay.remove();
+        document.getElementById('scp-splash').remove();
+    }
+    await PluginManager.init();
     AudioHandler.playUI('ambient');
     await renderer.render("[SIZE=24][SCP FOUNDATION'S DOSSIER HUB][/SIZE][TIMER=1]",
         output, '', null, false);

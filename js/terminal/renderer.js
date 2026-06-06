@@ -119,8 +119,25 @@ class StepRenderer {
         const tables = colors['Tables']   || base;
         scopeEl.style.setProperty('--theme-color',        base);
         scopeEl.style.setProperty('--theme-quote-border', quotes);
-        scopeEl.style.setProperty('--theme-quote-bg',     quotes + '0D');
-        scopeEl.style.setProperty('--theme-table-bg',     tables + '33');
+        scopeEl.style.setProperty('--theme-quote-bg',     StepRenderer._hexAlpha(quotes, '0D'));
+        scopeEl.style.setProperty('--theme-table-bg',     StepRenderer._hexAlpha(tables, '33'));
+    }
+
+    /**
+     * Безопасно добавляет HEX-alpha к цвету.
+     * #RGB  → #RRGGBB + alpha
+     * #RRGGBB → #RRGGBB + alpha
+     * rgba()/hsl() и прочие → возвращает как есть (CSS не ломается)
+     */
+    static _hexAlpha(color, alpha) {
+        const h = color.trim();
+        if (h.startsWith('#')) {
+            const hex6 = h.length === 4
+                ? '#' + h[1]+h[1] + h[2]+h[2] + h[3]+h[3]
+                : h.slice(0, 7);
+            return hex6 + alpha;
+        }
+        return h;
     }
 
     // =========================================================================
@@ -589,9 +606,9 @@ class StepRenderer {
                 // ── [COLORCODES] — переопределение цветовой темы ─────────────
                 if (line.startsWith('[COLORCODES]')) {
                     const colors = {};
-                    line.replace('[COLORCODES]', '').split(';').forEach(pair => {
-                        const [k, v] = pair.split('=');
-                        if (k && v) colors[k.trim()] = v.trim();
+                    line.slice(12).split(';').forEach(pair => {
+                        const eq = pair.indexOf('=');
+                        if (eq > 0) colors[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
                     });
                     this._applyThemeToScope(scopeEl, colors);
                     continue;
@@ -842,6 +859,7 @@ class StepRenderer {
         let inQuote    = false;
         let inFootnote = false;
         let inList     = false;
+        let themeVars  = '';   // CSS-переменные из [COLORCODES]; пусто = дефолт унаследован
 
         /** Активный буфер контента: quote → footnote → main. */
         const cur = () => inQuote ? quoteBuf : inFootnote ? footBuf : out;
@@ -883,8 +901,25 @@ class StepRenderer {
 
             // ── Директивы без эффекта в статическом HTML ──────────────────
             if (RE_SPEED.test(line) || RE_TIMER.test(line) ||
-                /^\[(?:CHAR|WORD)MODE\]$/i.test(line)      ||
-                line.startsWith('[COLORCODES]')) continue;
+                /^\[(?:CHAR|WORD)MODE\]$/i.test(line)) continue;
+
+            // ── [COLORCODES] — собираем тему для обёртки вывода ───────────
+            if (line.startsWith('[COLORCODES]')) {
+                const colors = {};
+                line.slice(12).split(';').forEach(pair => {
+                    const eq = pair.indexOf('=');
+                    if (eq > 0) colors[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+                });
+                const base   = colors['Mainpage'] || '#a200ff';
+                const quotes = colors['Quotes']   || base;
+                const tables = colors['Tables']   || base;
+                themeVars =
+                    `--theme-color:${base};` +
+                    `--theme-quote-border:${quotes};` +
+                    `--theme-quote-bg:${StepRenderer._hexAlpha(quotes, '0D')};` +
+                    `--theme-table-bg:${StepRenderer._hexAlpha(tables, '33')}`;
+                continue;
+            }
 
             // ── Закрывающие блочные теги ───────────────────────────────────
             if (line.startsWith('[/TABLE6]')) {
@@ -1018,7 +1053,10 @@ class StepRenderer {
             out.push('<div class="doc-line"><span>[КОНЕЦ ДОКУМЕНТА]</span></div>\n');
         }
 
-        return out.join('');
+        // Если [COLORCODES] задал тему — оборачиваем в скоуп-контейнер,
+        // чтобы CSS-переменные применялись только к этому блоку, не глобально.
+        const html = out.join('');
+        return themeVars ? `<div class="dossier-scope" style="${themeVars}">${html}</div>` : html;
     }
 
     /**
