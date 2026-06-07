@@ -302,7 +302,11 @@ const PluginManager = (() => {
                 minSize: 40,
                 maxSize: 320,
                 status:  'SECURITY CHECK',
+				isResizable: false,
+				backdrop: true
             });
+            
+            TerminalAPI.unlockInput();
 
             // Ждём отрисовку окна
             requestAnimationFrame(() => {
@@ -561,14 +565,13 @@ const PluginManager = (() => {
         await new Promise(r => setTimeout(r, 120));
 
         // ── Шаг 1: Загрузка (0→35%) ─────────────────────────────────────────
+        // _fetchPlugin уже содержит CORS-fallback через прокси — используем её.
         ui.setProgress(5, 'ЗАГРУЗКА ФАЙЛА...');
 
         let code;
         try {
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            ui.setProgress(25, 'ЗАГРУЗКА ФАЙЛА...');
-            code = await resp.text();
+            ui.setProgress(20, 'ЗАГРУЗКА ФАЙЛА...');
+            code = await _fetchPlugin(url, terminal);
             ui.setProgress(35, 'ФАЙЛ ПОЛУЧЕН');
         } catch (err) {
             ui.error(`Ошибка загрузки: ${err.message}`);

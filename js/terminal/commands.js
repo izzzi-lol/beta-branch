@@ -1,5 +1,5 @@
 // Глобальный список для автодополнения в main.js
-const COMMAND_LIST = ['get', 'help', 'clear', 'echo', 'reboot', 'upload','settings','browse','changelogs','plugin'];
+const COMMAND_LIST = ['get', 'help', 'clear', 'echo', 'reboot','test-dossier', 'upload','settings','browse','changelogs','plugin'];
 
 const CommandHandler = {
     async execute(rawInput, terminal) {
@@ -22,6 +22,7 @@ const CommandHandler = {
                 terminal.printSystem("  GET [запрос]", 'var(--terminal-green)');
                 terminal.printSystem("    Поиск и вывод досье по ID или ключевому слову.");
                 terminal.printSystem("    Пример: get 01005423 / get izzy");
+                terminal.printSystem(`    "get ." - Показывает все доступные досье.`);
                 terminal.printSystem(" ");
                 terminal.printSystem("  ECHO [ID]", 'var(--terminal-green)');
                 terminal.printSystem("    Воспроизведение звуковой записи с субтитрами.");
@@ -95,6 +96,14 @@ const CommandHandler = {
                     break;
             case 'plugin':
                 await CmdPlugin.execute(args, terminal);
+                break;
+            case 'test-dossier':
+                await fetch('dossier_for_test.txt').then((res) => res.text())
+                    .then(text => {
+                        let sessionFiles = {};
+                        sessionFiles['izzy_profile.jpg'] = CmdUpload.fileToBase64('izzy_profile.jpg');
+                        renderer.render(text, output,'./', sessionFiles, true);
+                });
                 break;
             default:
                 if (cmd !== '') {
