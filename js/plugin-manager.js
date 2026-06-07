@@ -305,7 +305,7 @@ const PluginManager = (() => {
 				isResizable: false,
 				backdrop: true
             });
-            
+
             TerminalAPI.unlockInput();
 
             // Ждём отрисовку окна
