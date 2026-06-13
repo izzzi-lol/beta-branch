@@ -22,10 +22,35 @@ async function handleUrlParams() {
     if (_urlParamsHandled) return;
     _urlParamsHandled = true;
     const urlParams = new URLSearchParams(window.location.search);
-    const dossierId = urlParams.get('get');
+    const dossierId  = urlParams.get('get');
+    const dossierB64 = urlParams.get('dossierB64');
+
+    // Превью из расширения Chrome — декодируем base64 и рендерим
+    if (dossierB64) {
+        try {
+            // URLSearchParams.get() заменяет '+' на пробел (стандарт form-urlencoded),
+            // но base64 использует '+' как служебный символ — восстанавливаем.
+            const b64clean = dossierB64.replace(/ /g, '+');
+
+            // TextDecoder надёжнее хака escape()/decodeURIComponent() для UTF-8.
+            const bytes   = Uint8Array.from(atob(b64clean), c => c.charCodeAt(0));
+            const json    = JSON.parse(new TextDecoder().decode(bytes));
+            const content = json.content ?? '';
+            const images  = json.images  ?? {};  // { 'filename.jpg': 'data:image/...' }
+
+            TerminalAPI.printSystem('> ВНЕШНИЙ ИМПОРТ: SCIPNET DOSSIER EXTENSION', 'var(--terminal-green)');
+            TerminalAPI.lockInput();
+            await renderer.render(content, output, '', images, true);
+            TerminalAPI.unlockInput();
+        } catch (e) {
+            TerminalAPI.printError(`ОШИБКА ИМПОРТА: ${e.message}`);
+        }
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return;
+    }
 
     if (dossierId) {
-        TerminalAPI.printSystem(`> АВТОМАТИЧЕСКИЙ ЗАПРОС СИСТЕМЫ: GET ${dossierId}`,'var(--terminal-green)');
+        TerminalAPI.printSystem(`> АВТОМАТИЧЕСКИЙ ЗАПРОС СИСТЕМЫ: GET ${dossierId}`, 'var(--terminal-green)');
         TerminalAPI.lockInput();
         await CmdGet.execute([dossierId], TerminalAPI);
         TerminalAPI.unlockInput();

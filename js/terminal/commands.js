@@ -105,6 +105,9 @@ const CommandHandler = {
                         renderer.render(text, output,'./', sessionFiles, true);
                 });
                 break;
+            case 'whoami':
+                await Cabinet.open(terminal);
+                break;
             default:
                 if (cmd !== '') {
                     terminal.printError(`КОМАНДА НЕ РАСПОЗНАНА: ${cmd}. Введите help для списка команд.`);
