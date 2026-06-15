@@ -373,12 +373,18 @@ const WindowManager = (() => {
 
                 const content = win.querySelector('.lyoko-content');
                 const wrapper = win.querySelector('.lyoko-content-wrapper');
-                const h0 = content
-                    ? (parseInt(content.style.maxHeight) || content.offsetHeight)
-                    : 200;
 
-                // extraH = высота titlebar + statusbar (не меняется во время ресайза)
-                const extraH = rect.height - h0;
+                // extraH — фиксированные части окна (titlebar + statusbar).
+                // Считаем от реальных элементов, а НЕ как rect.height - maxHeight,
+                // иначе при малом контенте extraH уходит в отрицательные значения.
+                const titlebarEl  = win.querySelector('.lyoko-titlebar');
+                const statusbarEl = win.querySelector('.lyoko-statusbar');
+                const extraH = (titlebarEl?.offsetHeight ?? 0) +
+                               (statusbarEl?.offsetHeight ?? 0);
+
+                // h0 — текущая ВИДИМАЯ высота контента (не maxHeight-ограничение).
+                // Это позволяет тянуть вниз даже когда контент маленький.
+                const h0 = content ? content.offsetHeight : 200;
 
                 // ── Создаём ghost-прямоугольник ──────────────────────────────
                 // Без box-shadow: тень с блюром пересчитывается каждый кадр при
