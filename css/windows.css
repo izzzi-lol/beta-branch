@@ -203,10 +203,8 @@
    0fr его не убирает. Без этого правила у окон с padding на .lyoko-content
    (settings и др.) остаётся щель высотой padding-top + padding-bottom.
    Browse не затронут: он сам обнуляет padding через cssText.              */
-.lyoko-content-wrapper.collapsed .lyoko-content {
-    padding-top: 0;
-    padding-bottom: 0;
-}
+/* padding анимируется через grid-trick + явный height=0 в JS;
+   отдельное CSS-правило не нужно и вызывало рывок. */
 
 /* ── Контент окна ───────────────────────────────────────────── */
 .lyoko-content {

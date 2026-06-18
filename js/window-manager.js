@@ -226,6 +226,20 @@ const WindowManager = (() => {
         });
     }
 
+    /**
+     * Устанавливает И max-height, И height на .lyoko-content.
+     *
+     * Без явного height процентные размеры дочерних элементов
+     * (например .te-root { height: 100% } в текстовом редакторе)
+     * не резолвятся относительно max-height — контент схлопывается
+     * к auto-высоте, окно выглядит "маленьким", а ресайз визуально
+     * ничего не меняет.
+     */
+    function _setContentHeight(content, px) {
+        content.style.maxHeight = px + 'px';
+        content.style.height    = px + 'px';
+    }
+
     function _makeSizeToggle(win, content, statusbar, opts, maxCtrl) {
         // savedH обновляется перед каждым сворачиванием — учитывает ручной ресайз
         let savedH = opts.height || opts.maxSize || 480;
@@ -240,8 +254,9 @@ const WindowManager = (() => {
                 const curH = parseInt(content.style.maxHeight);
                 if (curH > 0) savedH = curH;
                 content.style.maxHeight = '0';
+                content.style.height    = '0';
             } else {
-                content.style.maxHeight = savedH + 'px';
+                _setContentHeight(content, savedH);
             }
             content.style.overflow  = isMin ? 'hidden' : '';
             btn.title     = isMin ? 'Развернуть' : 'Свернуть';
@@ -302,7 +317,7 @@ const WindowManager = (() => {
             win.style.top           = cy + 'px';
             win.style.width         = targetW + 'px';
             content.style.overflow  = '';
-            content.style.maxHeight = targetH + 'px';
+            _setContentHeight(content, targetH);
 
             if (!opts.backdrop) backdrop.classList.toggle('visible', true);
 
@@ -322,7 +337,7 @@ const WindowManager = (() => {
             win.style.left          = _snap.left;
             win.style.top           = _snap.top;
             win.style.width         = _snap.width;
-            content.style.maxHeight = _snap.maxHeight;
+            _setContentHeight(content, parseInt(_snap.maxHeight) || 480);
 
             if (opts.maxWidth) win.style.maxWidth = opts.maxWidth + 'px';
 
@@ -373,18 +388,12 @@ const WindowManager = (() => {
 
                 const content = win.querySelector('.lyoko-content');
                 const wrapper = win.querySelector('.lyoko-content-wrapper');
+                const h0 = content
+                    ? (parseInt(content.style.maxHeight) || content.offsetHeight)
+                    : 200;
 
-                // extraH — фиксированные части окна (titlebar + statusbar).
-                // Считаем от реальных элементов, а НЕ как rect.height - maxHeight,
-                // иначе при малом контенте extraH уходит в отрицательные значения.
-                const titlebarEl  = win.querySelector('.lyoko-titlebar');
-                const statusbarEl = win.querySelector('.lyoko-statusbar');
-                const extraH = (titlebarEl?.offsetHeight ?? 0) +
-                               (statusbarEl?.offsetHeight ?? 0);
-
-                // h0 — текущая ВИДИМАЯ высота контента (не maxHeight-ограничение).
-                // Это позволяет тянуть вниз даже когда контент маленький.
-                const h0 = content ? content.offsetHeight : 200;
+                // extraH = высота titlebar + statusbar (не меняется во время ресайза)
+                const extraH = rect.height - h0;
 
                 // ── Создаём ghost-прямоугольник ──────────────────────────────
                 // Без box-shadow: тень с блюром пересчитывается каждый кадр при
@@ -432,7 +441,7 @@ const WindowManager = (() => {
                     if (doW) win.style.width = _pendingW + 'px';
                     if (doH && content) {
                         content.style.overflow  = '';
-                        content.style.maxHeight = _pendingH + 'px';
+                        _setContentHeight(content, _pendingH);
                     }
 
                     // ── Убираем ghost, возвращаем контент ───────────────────
@@ -477,7 +486,18 @@ const WindowManager = (() => {
             return;
         }
 
-        // Desktop
+        // Desktop — та же техника, что у кнопки свернуть/развернуть:
+        // height + maxHeight управляют размером, grid анимирует враппер.
+        const content = win.querySelector('.lyoko-content');
+        const targetH = content ? (parseInt(content.style.maxHeight) || 480) : 480;
+
+        // Мгновенное схлопывание во время flash (transitions отключаем руками,
+        // чтобы CSS max-height transition не стартовал раньше времени).
+        if (content) {
+            content.style.transition = 'none';
+            content.style.maxHeight  = '0';
+            content.style.overflow   = 'hidden';
+        }
         wrapper.style.transition = 'none';
         wrapper.classList.add('collapsed');
         win.classList.add('wm-flash-in');
@@ -490,6 +510,15 @@ const WindowManager = (() => {
         await _sleep(28);
 
         if (win.dataset.closing) return;
+
+        // Возвращаем transitions и разворачиваем — grid и max-height анимируются
+        // в одном кадре, ровно как setSize(false).
+        if (content) {
+            content.style.transition = '';
+            content.style.maxHeight  = targetH + 'px';
+            content.style.height     = targetH + 'px';
+            content.style.overflow   = '';
+        }
         wrapper.style.transition = '';
         wrapper.classList.remove('collapsed');
     }
@@ -511,7 +540,13 @@ const WindowManager = (() => {
             return;
         }
 
-        // Desktop
+        // Desktop — та же техника, что у кнопки свернуть:
+        // height=0 + maxHeight=0 + collapsed — grid анимирует враппер.
+        const content = win.querySelector('.lyoko-content');
+        if (content) {
+            content.style.maxHeight = '0';
+            content.style.overflow  = 'hidden';
+        }
         wrapper.classList.add('collapsed');
         await _sleep(410);
         win.classList.add('wm-flash-out');
