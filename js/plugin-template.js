@@ -2,6 +2,13 @@
 //  ШАБЛОН ПЛАГИНА ДЛЯ SCIPNET
 //  Скопируй, заполни и захости на GitHub Gist / raw GitHub / любом CDN.
 //  Установка: plugin install <прямая ссылка на этот файл>
+//
+//  Доступные объекты PluginAPI:
+//    PluginAPI.WindowManager   — открыть/закрыть окна (.open, .close, .closeAll)
+//    PluginAPI.terminal        — printSystem, printError, lockInput...
+//    PluginAPI.renderer        — StepRenderer (toHTML — рендер досье-текста)
+//    PluginAPI.AudioHandler    — звуки интерфейса (playUI)
+//    PluginAPI.storage(id)     — персистентное хранилище плагина (IndexedDB)
 // =============================================================================
 
 (function () {
@@ -11,6 +18,23 @@
         console.error('[my-plugin] PluginAPI не найден. Файл загружен вне SCIPNET?');
         return;
     }
+
+    const PLUGIN_ID = 'my-plugin'; // используй ОДНО и то же значение здесь и в register()
+
+    // ── Персистентное хранилище плагина ────────────────────────────────────────
+    // Данные переживают перезагрузку страницы и физически изолированы от
+    // других плагинов (ключи неймспейсятся по PLUGIN_ID внутри PluginAPI).
+    // Подходит для текста, JSON-объектов, data-URL изображений и т.п.
+    const _store = PluginAPI.storage(PLUGIN_ID);
+
+    // Пример использования (раскомментируй где нужно):
+    //
+    //   await _store.set('settings', { theme: 'green' });   // сохранить
+    //   const settings = await _store.get('settings');      // → объект или null
+    //   await _store.remove('settings');                    // удалить один ключ
+    //   const keys = await _store.keys();                   // все ключи ЭТОГО плагина
+    //   await _store.clear();                                // удалить всё (обычно не нужно
+    //                                                         //   вручную — plugin remove делает это сам)
 
     // ── Опциональный CSS плагина ───────────────────────────────────────────────
     // Вставляется один раз через guard по id.
@@ -41,7 +65,7 @@
         _injectStyles();
 
         // Пример: открыть окно
-        PluginAPI.WindowManager.open('my-plugin', 'МОЙ ПЛАГИН', _buildHTML(), {
+        PluginAPI.WindowManager.open(PLUGIN_ID, 'МОЙ ПЛАГИН', _buildHTML(), {
             width:  500,
             height: 360,
             status: 'MY PLUGIN v1.0',
@@ -53,7 +77,7 @@
 
     // ── Регистрация ────────────────────────────────────────────────────────────
     PluginAPI.register({
-        id:          'my-plugin',        // уникальный ID — используется в "plugin remove"
+        id:          PLUGIN_ID,          // уникальный ID — используется в "plugin remove"
         name:        'Мой Плагин',       // отображаемое имя в "plugin list"
         command:     'myplugin',         // команда в терминале
         description: 'Пример плагина',  // для справки

@@ -681,6 +681,14 @@ const PluginManager = (() => {
             // Снимаем команду немедленно (не нужна перезагрузка)
             PluginAPI.unregister(id);
 
+            // Чистим персистентное хранилище плагина (PluginAPI.storage),
+            // чтобы удалённый плагин не оставлял мусор в IndexedDB.
+            try {
+                await PluginAPI.storage(id).clear();
+            } catch (err) {
+                console.warn(`[PluginManager] Не удалось очистить storage плагина "${id}":`, err);
+            }
+
             terminal.printSystem(`✓ УДАЛЕНО: ${rec.name ?? id}`, 'rgba(0,200,100,0.9)');
         } catch (err) {
             terminal.printError(`ОШИБКА: ${err.message}`);
