@@ -12,6 +12,7 @@
 //        url:         string,   // откуда был загружен
 //        code:        string,   // JS-код плагина
 //        version:     string,
+//        autostart:   boolean,  // true → команда плагина запускается сама при загрузке сайта
 //        installedAt: number,
 //        updatedAt:   number,
 //    }
@@ -161,6 +162,13 @@ const PluginManager = (() => {
         };
     }
 
+    /** Человекочитаемый размер файла: 1234 → "1.2 KB" */
+    function _formatBytes(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
     // =========================================================================
     //  Диалог подтверждения — окно с hold-to-install кнопкой
     //
@@ -170,9 +178,20 @@ const PluginManager = (() => {
 
     const HOLD_MS = 2000; // сколько держать кнопку
 
-    function _confirmWindow(url) {
+    function _confirmWindow(source) {
         return new Promise(resolve => {
-            const safeUrl = url.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            // source — либо строка-URL (установка по ссылке), либо объект
+            // { type:'file', name, size } для drag-n-drop установки локального файла.
+            const isFile  = typeof source === 'object' && source.type === 'file';
+            const rawText = isFile ? `${source.name}  (${_formatBytes(source.size)})` : source;
+            const safeUrl = String(rawText).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const bodyText = isFile
+                ? `Код из <b>локального файла</b> будет выполнен прямо на этой странице.<br>
+        Проверьте источник перед установкой. Вредоносный плагин может<br>
+        получить доступ ко всем данным терминала.`
+                : `Код из <b>внешнего источника</b> будет выполнен прямо на этой странице.<br>
+        Проверьте источник перед установкой. Вредоносный плагин может<br>
+        получить доступ ко всем данным терминала.`;
 
             const html = `
 <style>
@@ -278,9 +297,7 @@ const PluginManager = (() => {
         <div class="pc-title">ПРЕДУПРЕЖДЕНИЕ БЕЗОПАСНОСТИ</div>
     </div>
     <div class="pc-body">
-        Код из <b>внешнего источника</b> будет выполнен прямо на этой странице.<br>
-        Проверьте источник перед установкой. Вредоносный плагин может<br>
-        получить доступ ко всем данным терминала.
+        ${bodyText}
     </div>
     <div class="pc-url">${safeUrl}</div>
     <div class="pc-sep"></div>
@@ -396,15 +413,148 @@ const PluginManager = (() => {
     }
 
     // =========================================================================
+    //  DRAG-AND-DROP УСТАНОВКА
+    //  Перетаскивание .js файла в любое место страницы открывает оверлей
+    //  и устанавливает плагин через installFromFile(). Глобальные listeners
+    //  на window — оверлей появляется независимо от того, что под курсором.
+    // =========================================================================
+
+    function _ensureDndStyles() {
+        if (document.getElementById('pm-dnd-style')) return;
+        const st = document.createElement('style');
+        st.id = 'pm-dnd-style';
+        st.textContent = `
+            #pm-dnd-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 9000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(3, 12, 7, 0.88);
+                backdrop-filter: blur(3px);
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.18s ease;
+            }
+            #pm-dnd-overlay.visible { opacity: 1; pointer-events: all; }
+
+            #pm-dnd-box {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 14px;
+                padding: 48px 64px;
+                border: 2px dashed rgba(0, 200, 100, 0.45);
+                background: rgba(0, 200, 100, 0.04);
+                font-family: var(--mono-font, monospace);
+                color: rgba(0, 200, 100, 0.85);
+                text-align: center;
+                transition: border-color 0.15s, background 0.15s, color 0.15s;
+            }
+            #pm-dnd-overlay.reject #pm-dnd-box {
+                border-color: rgba(255, 50, 80, 0.5);
+                background: rgba(255, 50, 80, 0.05);
+                color: rgba(255, 80, 100, 0.9);
+            }
+            #pm-dnd-icon {
+                font-size: 2.6em;
+                animation: pmDndBob 1.4s ease-in-out infinite;
+            }
+            @keyframes pmDndBob {
+                0%, 100% { transform: translateY(0); }
+                50%      { transform: translateY(-8px); }
+            }
+            #pm-dnd-title { font-size: 0.85em; letter-spacing: 3px; text-transform: uppercase; }
+            #pm-dnd-sub   { font-size: 0.65em; letter-spacing: 1.5px; color: rgba(0, 200, 100, 0.4); }
+            #pm-dnd-overlay.reject #pm-dnd-sub { color: rgba(255, 80, 100, 0.55); }
+        `;
+        document.head.appendChild(st);
+    }
+
+    function _setupDragDrop() {
+        _ensureDndStyles();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'pm-dnd-overlay';
+        overlay.innerHTML = `
+            <div id="pm-dnd-box">
+                <div id="pm-dnd-icon">⇩</div>
+                <div id="pm-dnd-title">ОТПУСТИТЕ ДЛЯ УСТАНОВКИ ПЛАГИНА</div>
+                <div id="pm-dnd-sub">ТОЛЬКО .JS · ДО 2 МБ</div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        // Счётчик вложенных dragenter/dragleave — у дочерних элементов страницы
+        // тоже срабатывают эти события, наивный show/hide на каждом из них мигал бы.
+        let depth = 0;
+        let rejectTimer = null;
+
+        const hasFiles = e => Array.from(e.dataTransfer?.types || []).includes('Files');
+
+        window.addEventListener('dragenter', e => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            depth++;
+            overlay.classList.add('visible');
+        });
+
+        window.addEventListener('dragover', e => {
+            if (!hasFiles(e)) return;
+            e.preventDefault(); // обязательно — без этого drop не сработает
+        });
+
+        window.addEventListener('dragleave', e => {
+            if (!hasFiles(e)) return;
+            depth = Math.max(0, depth - 1);
+            if (depth === 0) overlay.classList.remove('visible');
+        });
+
+        window.addEventListener('drop', async e => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            depth = 0;
+
+            const files  = Array.from(e.dataTransfer.files || []);
+            const jsFile = files.find(f => /\.js$/i.test(f.name));
+            const terminal = PluginAPI.terminal;
+
+            if (!jsFile) {
+                // Неверный тип файла — короткая красная вспышка вместо мгновенного скрытия
+                overlay.classList.add('reject');
+                clearTimeout(rejectTimer);
+                rejectTimer = setTimeout(() => overlay.classList.remove('visible', 'reject'), 650);
+                terminal?.printError('PLUGIN INSTALL: перетащите .js файл плагина.');
+                return;
+            }
+
+            overlay.classList.remove('visible');
+
+            if (!terminal) return; // терминал ещё не инициализирован — маловероятно
+
+            if (files.length > 1) {
+                terminal.printSystem(
+                    `ℹ Обнаружено файлов: ${files.length} — установлен будет только "${jsFile.name}".`,
+                    'rgba(150,150,150,.6)'
+                );
+            }
+
+            await installFromFile(jsFile, terminal);
+        });
+    }
+
+    // =========================================================================
     //  ПУБЛИЧНЫЙ API
     // =========================================================================
 
     /**
      * Вызвать ОДИН РАЗ из main.js → window.onload (до unlockInput).
-     * Патчит CommandHandler и загружает все сохранённые плагины из IDB.
+     * Патчит CommandHandler, загружает все сохранённые плагины из IDB
+     * и включает drag-n-drop установку .js файлов.
      */
     async function init() {
         _patchCommandHandler();
+        _setupDragDrop();
 
         let db;
         try {
@@ -427,6 +577,35 @@ const PluginManager = (() => {
 
         if (records.length > 0) {
             console.log(`[PluginManager] Загружено плагинов: ${records.length}`);
+        }
+
+        // =====================================================================
+        //  Автозапуск
+        //
+        //  Плагины с autostart:true вызывают свою же зарегистрированную команду
+        //  сразу после того, как все плагины выполнили register(). Не дожидаемся
+        //  завершения (fire-and-forget) — иначе тяжёлый плагин (сетевые запросы,
+        //  построение UI) блокировал бы остальной запуск сайта (auth/splash/
+        //  приветственные сообщения в main.js, которые идут после init()).
+        // =====================================================================
+
+        const autostartRecs = records.filter(r => r.autostart);
+        if (autostartRecs.length) {
+            // PluginAPI.terminal — typeof-safe геттер на TerminalAPI (см. plugin-api.js).
+            // К моменту вызова init() (window.onload) TerminalAPI уже объявлен.
+            const terminal = PluginAPI.terminal;
+            const commands = PluginAPI.getCommands();
+
+            for (const rec of autostartRecs) {
+                const cmd = commands[rec.command];
+                if (!cmd) {
+                    console.warn(`[PluginManager] Автозапуск: команда "${rec.command}" не найдена (${rec.id})`);
+                    continue;
+                }
+                cmd.execute([], terminal).catch(err =>
+                    console.error(`[PluginManager] Ошибка автозапуска "${rec.id}":`, err)
+                );
+            }
         }
     }
 
@@ -518,11 +697,17 @@ const PluginManager = (() => {
             el.className = 'pi-status' + (type ? ' ' + type : '');
         }
 
-        function _finish() {
-            _setProgress(100, 'УСТАНОВЛЕНО');
-            _setStatus('✓ Плагин успешно установлен', 'ok');
-            // Закрываем окно через 2.2 сек
-            setTimeout(() => WindowManager.close('plugin-install'), 2200);
+        function _finish(opts = {}) {
+            if (opts.autostart) {
+                _setProgress(100, 'УСТАНОВЛЕНО · АВТОЗАПУСК ВКЛ');
+                _setStatus('⚡ Установлен — будет запускаться автоматически', 'ok');
+                // Чуть дольше держим окно — уведомление об автозапуске важно прочитать
+                setTimeout(() => WindowManager.close('plugin-install'), 3200);
+            } else {
+                _setProgress(100, 'УСТАНОВЛЕНО');
+                _setStatus('✓ Плагин успешно установлен', 'ok');
+                setTimeout(() => WindowManager.close('plugin-install'), 2200);
+            }
         }
 
         function _error(msg) {
@@ -542,41 +727,36 @@ const PluginManager = (() => {
     //  INSTALL
     // =========================================================================
 
-    async function install(url, terminal) {
-        if (!url) {
-            terminal.printError('PLUGIN INSTALL: укажите URL');
-            terminal.printSystem('  Пример: plugin install https://example.com/my-plugin.js');
-            return;
-        }
+    /**
+     * Общая логика установки ПОСЛЕ подтверждения пользователя.
+     * Источник кода: либо fetchUrl (сетевая загрузка через _fetchPlugin),
+     * либо готовый code + pseudoUrl (локальный файл — сетевой запрос не нужен).
+     */
+    async function _runInstall({ terminal, fetchUrl, code, pseudoUrl }) {
+        const ui  = _openInstallWindow();
+        const url = fetchUrl || pseudoUrl;
 
-        if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-
-        // Показываем окно подтверждения с hold-to-install
-        const confirmed = await _confirmWindow(url);
-        if (!confirmed) {
-            terminal.printSystem('УСТАНОВКА ОТМЕНЕНА.');
-            return;
-        }
-
-        // Открываем окно установки
-        const ui = _openInstallWindow();
-
-        // Небольшая пауза — окно успевает отрисоваться
         await new Promise(r => setTimeout(r, 120));
 
-        // ── Шаг 1: Загрузка (0→35%) ─────────────────────────────────────────
-        // _fetchPlugin уже содержит CORS-fallback через прокси — используем её.
-        ui.setProgress(5, 'ЗАГРУЗКА ФАЙЛА...');
-
-        let code;
-        try {
-            ui.setProgress(20, 'ЗАГРУЗКА ФАЙЛА...');
-            code = await _fetchPlugin(url, terminal);
-            ui.setProgress(35, 'ФАЙЛ ПОЛУЧЕН');
-        } catch (err) {
-            ui.error(`Ошибка загрузки: ${err.message}`);
-            terminal.printError(`ОШИБКА ЗАГРУЗКИ: ${err.message}`);
-            return;
+        // ── Шаг 1: Получение кода (0→35%) ─────────────────────────────────────
+        if (!code) {
+            // _fetchPlugin уже содержит CORS-fallback через прокси.
+            ui.setProgress(5, 'ЗАГРУЗКА ФАЙЛА...');
+            try {
+                ui.setProgress(20, 'ЗАГРУЗКА ФАЙЛА...');
+                code = await _fetchPlugin(fetchUrl, terminal);
+                ui.setProgress(35, 'ФАЙЛ ПОЛУЧЕН');
+            } catch (err) {
+                ui.error(`Ошибка загрузки: ${err.message}`);
+                terminal.printError(`ОШИБКА ЗАГРУЗКИ: ${err.message}`);
+                return;
+            }
+        } else {
+            // Код уже прочитан из локального файла (drag-n-drop) — сетевой запрос
+            // не требуется, но сохраняем шаг прогресса для единообразия UX.
+            ui.setProgress(20, 'ЧТЕНИЕ ЛОКАЛЬНОГО ФАЙЛА...');
+            await new Promise(r => setTimeout(r, 100));
+            ui.setProgress(35, 'ФАЙЛ ПРОЧИТАН');
         }
 
         // ── Шаг 2: Выполнение и валидация (35→60%) ──────────────────────────
@@ -621,7 +801,11 @@ const PluginManager = (() => {
         ui.setProgress(75, 'СОХРАНЕНИЕ...');
         await new Promise(r => setTimeout(r, 60));
 
-        // ── Шаг 4: Сохранение в IndexedDB (75→95%) ──────────────────────────
+        // ── Шаг 4: Сохранение в IndexedDB (75→95%) ───────────────────────────
+        // autostart — запрос самого плагина из PluginAPI.register({ autostart: true }).
+        // Применяем как есть: это явное намерение автора, пользователь уже видел
+        // окно подтверждения безопасности и поставил его, а после установки
+        // получит отдельное уведомление и сможет отключить в любой момент.
         const record = {
             id:          meta.id,
             name:        meta.name,
@@ -630,6 +814,7 @@ const PluginManager = (() => {
             author:      meta.author || '—',
             url,
             code,
+            autostart:   meta.autostart === true,
             installedAt: Date.now(),
             updatedAt:   Date.now(),
         };
@@ -648,8 +833,88 @@ const PluginManager = (() => {
         await new Promise(r => setTimeout(r, 80));
 
         // ── Шаг 5: Готово (95→100%) ──────────────────────────────────────────
-        ui.finish();
+        ui.finish({ autostart: record.autostart });
         terminal.printSystem(`✓ УСТАНОВЛЕНО: ${meta.name} v${meta.version}  [${record.command}]`, 'rgba(0,200,100,.9)');
+
+        // Уведомление об автозапуске — плагин запросил его сам через register().
+        if (record.autostart) {
+            terminal.printSystem(
+                '⚡ АВТОЗАПУСК: плагин будет запускаться автоматически при каждой загрузке сайта.',
+                'rgba(255,200,0,.85)'
+            );
+            terminal.printSystem(
+                `  Отключить: plugin autostart ${record.id}   (или Settings → Плагины)`,
+                'rgba(150,150,150,.6)'
+            );
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Устанавливает плагин по прямой ссылке на JS-файл.
+     */
+    async function install(url, terminal) {
+        if (!url) {
+            terminal.printError('PLUGIN INSTALL: укажите URL');
+            terminal.printSystem('  Пример: plugin install https://example.com/my-plugin.js');
+            return;
+        }
+
+        if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+        const confirmed = await _confirmWindow(url);
+        if (!confirmed) {
+            terminal.printSystem('УСТАНОВКА ОТМЕНЕНА.');
+            return;
+        }
+
+        await _runInstall({ terminal, fetchUrl: url });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Устанавливает плагин из локального .js файла — drag-n-drop на страницу
+     * или программный вызов с объектом File. Сетевой запрос не требуется:
+     * код читается напрямую через File.text().
+     *
+     * Источник записывается как "file://<имя файла>" — это позволяет
+     * "plugin update" распознать локально установленные плагины и не пытаться
+     * их перезагружать по несуществующему URL.
+     */
+    async function installFromFile(file, terminal) {
+        if (!file) return;
+
+        if (!/\.js$/i.test(file.name)) {
+            terminal.printError(`PLUGIN INSTALL: неверный тип файла "${file.name}" — ожидается .js`);
+            return;
+        }
+
+        const MAX_SIZE = 2 * 1024 * 1024; // 2 МБ — разумный потолок для одного плагина
+        if (file.size > MAX_SIZE) {
+            terminal.printError(
+                `PLUGIN INSTALL: файл слишком большой (${_formatBytes(file.size)}, максимум ${_formatBytes(MAX_SIZE)})`
+            );
+            return;
+        }
+
+        let code;
+        try {
+            code = await file.text();
+        } catch (err) {
+            terminal.printError(`ОШИБКА ЧТЕНИЯ ФАЙЛА: ${err.message}`);
+            return;
+        }
+
+        const confirmed = await _confirmWindow({ type: 'file', name: file.name, size: file.size });
+        if (!confirmed) {
+            terminal.printSystem('УСТАНОВКА ОТМЕНЕНА.');
+            return;
+        }
+
+        terminal.printSystem(`УСТАНОВКА ИЗ ФАЙЛА: ${file.name}`);
+        await _runInstall({ terminal, code, pseudoUrl: 'file://' + file.name });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -721,7 +986,7 @@ const PluginManager = (() => {
         terminal.printSystem(`\n─── ПЛАГИНЫ (${records.length}) ───────────────────`);
         for (const r of records) {
             const date = new Date(r.installedAt).toLocaleDateString('ru-RU');
-            terminal.printSystem(`  ${r.id}  ${r.name}  v${r.version}  (${date})`);
+            terminal.printSystem(`  ${r.id}  ${r.name}  v${r.version}${r.autostart ? '  ⚡AUTOSTART' : ''}  (${date})`);
             terminal.printSystem(`  └─ команда: ${r.command}  |  ${r.url}`, 'rgba(150,150,150,0.6)');
         }
         terminal.printSystem('───────────────────────────────────────\n');
@@ -750,6 +1015,13 @@ const PluginManager = (() => {
                 return;
             }
 
+            if (rec.url.startsWith('file://')) {
+                terminal.printError(`PLUGIN UPDATE: "${rec.name}" установлен из локального файла — автообновление недоступно.`);
+                terminal.printSystem('  Удалите плагин и перетащите новую версию .js файла для переустановки.');
+                db.close();
+                return;
+            }
+
             terminal.printSystem(`ОБНОВЛЕНИЕ: ${rec.name}  (${rec.url})`);
 
             const code = await _fetchPlugin(rec.url, terminal);
@@ -771,6 +1043,94 @@ const PluginManager = (() => {
 
     // ─────────────────────────────────────────────────────────────────────────
 
-    return { init, install, remove, list, update };
+    /**
+     * Включает/выключает автозапуск плагина при загрузке сайта.
+     * Переключатель (toggle) — повторный вызов отключает обратно.
+     * Вступает в силу со следующей загрузки страницы.
+     */
+    async function autostart(id, terminal) {
+        if (!id) {
+            terminal.printError('PLUGIN AUTOSTART: укажите ID плагина (см. plugin list)');
+            return;
+        }
+
+        let db;
+        let rec;
+        try {
+            db  = await _openDB();
+            rec = await _idbGet(_store(db), id);
+            db.close();
+        } catch (err) {
+            terminal.printError(`ОШИБКА: ${err.message}`);
+            db?.close();
+            return;
+        }
+
+        if (!rec) {
+            terminal.printError(`ПЛАГИН НЕ НАЙДЕН: "${id}"`);
+            return;
+        }
+
+        const enabled = !rec.autostart;
+        const ok = await setAutostart(id, enabled);
+        if (!ok) {
+            terminal.printError('ОШИБКА ЗАПИСИ В IndexedDB');
+            return;
+        }
+
+        if (enabled) {
+            terminal.printSystem(`✓ АВТОЗАПУСК ВКЛЮЧЁН: ${rec.name}`, 'rgba(0,200,100,0.9)');
+            terminal.printSystem('  Команда будет выполняться автоматически при каждой загрузке сайта.');
+        } else {
+            terminal.printSystem(`АВТОЗАПУСК ОТКЛЮЧЁН: ${rec.name}`, 'rgba(150,150,150,0.7)');
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Тихая запись флага автозапуска — без терминальных сообщений.
+     * Используется UI настроек (Settings → Плагины).
+     * Возвращает true при успехе, false если плагин не найден / ошибка IDB.
+     */
+    async function setAutostart(id, enabled) {
+        let db;
+        try {
+            db = await _openDB();
+            const rec = await _idbGet(_store(db), id);
+            if (!rec) { db.close(); return false; }
+            await _idbPut(_store(db, 'readwrite'), { ...rec, autostart: enabled === true });
+            db.close();
+            return true;
+        } catch (err) {
+            console.error('[PluginManager] setAutostart():', err);
+            db?.close();
+            return false;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Возвращает массив всех установленных плагинов (сырые записи из IDB).
+     * Используется UI настроек для построения панели «Плагины».
+     */
+    async function getAll() {
+        let db;
+        try {
+            db = await _openDB();
+            const records = await _idbGetAll(_store(db));
+            db.close();
+            return records;
+        } catch (err) {
+            console.error('[PluginManager] getAll():', err);
+            db?.close();
+            return [];
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+    return { init, install, installFromFile, remove, list, update, autostart, getAll, setAutostart };
 
 })();

@@ -97,6 +97,9 @@ const Settings = (() => {
                 <div class="lk-nav-item" data-panel="system">
                     <span class="lk-nav-icon">⬡</span> Система
                 </div>
+                <div class="lk-nav-item" data-panel="plugins">
+                    <span class="lk-nav-icon">⚙</span> Плагины
+                </div>
             </nav>
 
             <!-- Панели -->
@@ -236,6 +239,49 @@ const Settings = (() => {
                     </div>
                 </div>
 
+                <!-- ── Плагины ── -->
+                <div class="lk-panel" data-panel="plugins">
+                    <style>
+                        /* Скоуп: только эта панель — не задеваем остальной settings.css */
+                        .lk-plg-list      { display:flex; flex-direction:column; gap:8px; }
+                        .lk-plg-hint      { font-size:.74em; color:rgba(255,255,255,.35); line-height:1.7; padding:6px 2px; }
+                        .lk-plg-row       {
+                            display:flex; align-items:center; justify-content:space-between; gap:12px;
+                            padding:9px 12px; border:1px solid rgba(255,255,255,.08);
+                            background:rgba(255,255,255,.02);
+                        }
+                        .lk-plg-info      { min-width:0; }
+                        .lk-plg-name      { font-size:.8em; color:#e4e4e4; display:flex; align-items:center; gap:7px; }
+                        .lk-plg-ver       { font-size:.78em; color:rgba(0,200,180,.7); font-weight:normal; }
+                        .lk-plg-badge     {
+                            font-size:.6em; letter-spacing:1px; color:rgba(255,200,0,.85);
+                            border:1px solid rgba(255,200,0,.35); padding:1px 5px;
+                        }
+                        .lk-plg-meta      {
+                            font-size:.66em; color:rgba(255,255,255,.32); margin-top:2px;
+                            white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+                        }
+                        .lk-plg-actions   { display:flex; align-items:center; gap:14px; flex-shrink:0; }
+                        .lk-plg-actions .lk-toggle { margin:0; }
+                        .lk-plg-remove    {
+                            background:rgba(255,50,80,.08); border:1px solid rgba(255,50,80,.35);
+                            color:rgba(255,90,110,.9); font-size:.66em; letter-spacing:1px;
+                            padding:5px 10px; cursor:pointer; transition:background .15s,border-color .15s;
+                            font-family:var(--mono-font, monospace);
+                        }
+                        .lk-plg-remove:hover    { background:rgba(255,50,80,.2); border-color:rgba(255,50,80,.6); }
+                        .lk-plg-remove:disabled { opacity:.4; pointer-events:none; }
+                    </style>
+
+                    <div class="lk-group-label">Установленные плагины</div>
+                    <div class="lk-hint" style="margin-top:-6px; margin-bottom:8px;">
+                        Переключатель — автозапуск команды при загрузке сайта
+                    </div>
+                    <div class="lk-plg-list" id="lk-plugins-list">
+                        <div class="lk-plg-hint">Загрузка...</div>
+                    </div>
+                </div>
+
             </div>
         </div>`;
     }
@@ -340,6 +386,87 @@ const Settings = (() => {
         }
     }
 
+    // ── Панель «Плагины» ──────────────────────────────────────────────────────
+    //  Загружается асинхронно (IndexedDB) — отдельно от остального bindEvents,
+    //  т.к. остальные панели строятся синхронно из cfg.
+
+    async function _renderPluginsPanel(container) {
+        const listEl = container.querySelector('#lk-plugins-list');
+        if (!listEl) return;
+
+        if (typeof PluginManager === 'undefined') {
+            listEl.innerHTML = '<div class="lk-plg-hint">Менеджер плагинов недоступен.</div>';
+            return;
+        }
+
+        const records = await PluginManager.getAll();
+
+        if (!records.length) {
+            listEl.innerHTML = `
+                <div class="lk-plg-hint">
+                    Нет установленных плагинов.<br>
+                    Установить: <code>plugin install &lt;url&gt;</code> в терминале.
+                </div>`;
+            return;
+        }
+
+        // Стабильный порядок — по дате установки
+        records.sort((a, b) => a.installedAt - b.installedAt);
+
+        listEl.innerHTML = records.map(r => `
+            <div class="lk-plg-row" data-id="${r.id}">
+                <div class="lk-plg-info">
+                    <div class="lk-plg-name">
+                        ${r.name}
+                        <span class="lk-plg-ver">v${r.version}</span>
+                        ${r.autostart ? '<span class="lk-plg-badge">АВТОЗАПУСК</span>' : ''}
+                    </div>
+                    <div class="lk-plg-meta">команда: ${r.command} · автор: ${r.author || '—'}</div>
+                </div>
+                <div class="lk-plg-actions">
+                    <div class="lk-toggle ${r.autostart ? 'on' : ''}"
+                         data-autostart-id="${r.id}" title="Автозапуск"></div>
+                    <button class="lk-plg-remove" data-remove-id="${r.id}">Удалить</button>
+                </div>
+            </div>
+        `).join('');
+
+        // Тоггл автозапуска — тихая запись, без терминальных сообщений
+        listEl.querySelectorAll('[data-autostart-id]').forEach(toggle => {
+            toggle.addEventListener('click', async () => {
+                const id      = toggle.dataset.autostartId;
+                const enabled = !toggle.classList.contains('on');
+                toggle.classList.toggle('on', enabled); // оптимистичный UI
+                const ok = await PluginManager.setAutostart(id, enabled);
+                if (!ok) toggle.classList.toggle('on', !enabled); // откат при ошибке
+                else {
+                    const badgeRow = toggle.closest('.lk-plg-row').querySelector('.lk-plg-name');
+                    const badge    = badgeRow.querySelector('.lk-plg-badge');
+                    if (enabled && !badge) {
+                        badgeRow.insertAdjacentHTML('beforeend', '<span class="lk-plg-badge">АВТОЗАПУСК</span>');
+                    } else if (!enabled && badge) {
+                        badge.remove();
+                    }
+                }
+            });
+        });
+
+        // Удаление — переиспользуем PluginManager.remove (печатает в терминал),
+        // затем перерисовываем список панели.
+        listEl.querySelectorAll('[data-remove-id]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const id = btn.dataset.removeId;
+                btn.disabled    = true;
+                btn.textContent = '...';
+                const terminal = (typeof PluginAPI !== 'undefined' && PluginAPI.terminal)
+                    ? PluginAPI.terminal
+                    : { printSystem(){}, printError(){} }; // запасной no-op, если терминал недоступен
+                await PluginManager.remove(id, terminal);
+                await _renderPluginsPanel(container);
+            });
+        });
+    }
+
     // ── Публичный API ─────────────────────────────────────────────────────────
 
     function open() {
@@ -357,7 +484,10 @@ const Settings = (() => {
         // Навешиваем события после вставки в DOM
         requestAnimationFrame(() => {
             const container = document.querySelector('.lyoko-window[data-id="settings"] .lyoko-content');
-            if (container) bindEvents(container, cfg);
+            if (container) {
+                bindEvents(container, cfg);
+                _renderPluginsPanel(container); // асинхронно, не блокирует остальной UI
+            }
         });
     }
 

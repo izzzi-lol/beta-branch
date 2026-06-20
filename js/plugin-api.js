@@ -9,6 +9,11 @@
 //        command:     'edit',                  // команда в терминале
 //        description: 'Редактор с превью',     // для help
 //        version:     '1.0',                   // опционально
+//        author:      'izzzi_lol',             // опционально, показывается при установке
+//        autostart:   false,                   // опционально — запросить автозапуск
+//                                               // при каждой загрузке сайта. Пользователь
+//                                               // увидит уведомление при установке и сможет
+//                                               // отключить (plugin autostart / Settings).
 //        execute:     (args, terminal) => { }  // точка входа команды
 //    });
 //
@@ -175,7 +180,7 @@ const PluginAPI = (() => {
      * Регистрирует плагин и его терминальную команду.
      * Вызывается самим плагином при выполнении его кода.
      */
-    function register({ id, name, command, description, version = '1.0', execute }) {
+    function register({ id, name, command, description, version = '1.0', author = '—', autostart = false, execute }) {
         if (!id || !command || typeof execute !== 'function') {
             console.warn('[PluginAPI] register(): обязательны id, command и execute');
             return false;
@@ -188,7 +193,15 @@ const PluginAPI = (() => {
             return false;
         }
 
-        _commands[cmd] = { id, name: name ?? id, description: description ?? '', version, execute };
+        // autostart — пожелание автора плагина: запускать команду автоматически
+        // при каждой загрузке сайта. Решение принимается на установке (PluginManager.install),
+        // пользователь может в любой момент переключить через "plugin autostart <id>"
+        // или Settings → Плагины.
+        _commands[cmd] = {
+            id, name: name ?? id, description: description ?? '',
+            version, author, autostart: autostart === true,
+            execute,
+        };
 
         // Добавляем в COMMAND_LIST для автодополнения
         if (Array.isArray(window.COMMAND_LIST) && !window.COMMAND_LIST.includes(cmd)) {
