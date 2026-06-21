@@ -413,148 +413,15 @@ const PluginManager = (() => {
     }
 
     // =========================================================================
-    //  DRAG-AND-DROP УСТАНОВКА
-    //  Перетаскивание .js файла в любое место страницы открывает оверлей
-    //  и устанавливает плагин через installFromFile(). Глобальные listeners
-    //  на window — оверлей появляется независимо от того, что под курсором.
-    // =========================================================================
-
-    function _ensureDndStyles() {
-        if (document.getElementById('pm-dnd-style')) return;
-        const st = document.createElement('style');
-        st.id = 'pm-dnd-style';
-        st.textContent = `
-            #pm-dnd-overlay {
-                position: fixed;
-                inset: 0;
-                z-index: 9000;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                background: rgba(3, 12, 7, 0.88);
-                backdrop-filter: blur(3px);
-                opacity: 0;
-                pointer-events: none;
-                transition: opacity 0.18s ease;
-            }
-            #pm-dnd-overlay.visible { opacity: 1; pointer-events: all; }
-
-            #pm-dnd-box {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 14px;
-                padding: 48px 64px;
-                border: 2px dashed rgba(0, 200, 100, 0.45);
-                background: rgba(0, 200, 100, 0.04);
-                font-family: var(--mono-font, monospace);
-                color: rgba(0, 200, 100, 0.85);
-                text-align: center;
-                transition: border-color 0.15s, background 0.15s, color 0.15s;
-            }
-            #pm-dnd-overlay.reject #pm-dnd-box {
-                border-color: rgba(255, 50, 80, 0.5);
-                background: rgba(255, 50, 80, 0.05);
-                color: rgba(255, 80, 100, 0.9);
-            }
-            #pm-dnd-icon {
-                font-size: 2.6em;
-                animation: pmDndBob 1.4s ease-in-out infinite;
-            }
-            @keyframes pmDndBob {
-                0%, 100% { transform: translateY(0); }
-                50%      { transform: translateY(-8px); }
-            }
-            #pm-dnd-title { font-size: 0.85em; letter-spacing: 3px; text-transform: uppercase; }
-            #pm-dnd-sub   { font-size: 0.65em; letter-spacing: 1.5px; color: rgba(0, 200, 100, 0.4); }
-            #pm-dnd-overlay.reject #pm-dnd-sub { color: rgba(255, 80, 100, 0.55); }
-        `;
-        document.head.appendChild(st);
-    }
-
-    function _setupDragDrop() {
-        _ensureDndStyles();
-
-        const overlay = document.createElement('div');
-        overlay.id = 'pm-dnd-overlay';
-        overlay.innerHTML = `
-            <div id="pm-dnd-box">
-                <div id="pm-dnd-icon">⇩</div>
-                <div id="pm-dnd-title">ОТПУСТИТЕ ДЛЯ УСТАНОВКИ ПЛАГИНА</div>
-                <div id="pm-dnd-sub">ТОЛЬКО .JS · ДО 2 МБ</div>
-            </div>`;
-        document.body.appendChild(overlay);
-
-        // Счётчик вложенных dragenter/dragleave — у дочерних элементов страницы
-        // тоже срабатывают эти события, наивный show/hide на каждом из них мигал бы.
-        let depth = 0;
-        let rejectTimer = null;
-
-        const hasFiles = e => Array.from(e.dataTransfer?.types || []).includes('Files');
-
-        window.addEventListener('dragenter', e => {
-            if (!hasFiles(e)) return;
-            e.preventDefault();
-            depth++;
-            overlay.classList.add('visible');
-        });
-
-        window.addEventListener('dragover', e => {
-            if (!hasFiles(e)) return;
-            e.preventDefault(); // обязательно — без этого drop не сработает
-        });
-
-        window.addEventListener('dragleave', e => {
-            if (!hasFiles(e)) return;
-            depth = Math.max(0, depth - 1);
-            if (depth === 0) overlay.classList.remove('visible');
-        });
-
-        window.addEventListener('drop', async e => {
-            if (!hasFiles(e)) return;
-            e.preventDefault();
-            depth = 0;
-
-            const files  = Array.from(e.dataTransfer.files || []);
-            const jsFile = files.find(f => /\.js$/i.test(f.name));
-            const terminal = PluginAPI.terminal;
-
-            if (!jsFile) {
-                // Неверный тип файла — короткая красная вспышка вместо мгновенного скрытия
-                overlay.classList.add('reject');
-                clearTimeout(rejectTimer);
-                rejectTimer = setTimeout(() => overlay.classList.remove('visible', 'reject'), 650);
-                terminal?.printError('PLUGIN INSTALL: перетащите .js файл плагина.');
-                return;
-            }
-
-            overlay.classList.remove('visible');
-
-            if (!terminal) return; // терминал ещё не инициализирован — маловероятно
-
-            if (files.length > 1) {
-                terminal.printSystem(
-                    `ℹ Обнаружено файлов: ${files.length} — установлен будет только "${jsFile.name}".`,
-                    'rgba(150,150,150,.6)'
-                );
-            }
-
-            await installFromFile(jsFile, terminal);
-        });
-    }
-
-    // =========================================================================
     //  ПУБЛИЧНЫЙ API
     // =========================================================================
 
     /**
      * Вызвать ОДИН РАЗ из main.js → window.onload (до unlockInput).
-     * Патчит CommandHandler, загружает все сохранённые плагины из IDB
-     * и включает drag-n-drop установку .js файлов.
+     * Патчит CommandHandler и загружает все сохранённые плагины из IDB.
      */
     async function init() {
         _patchCommandHandler();
-        _setupDragDrop();
 
         let db;
         try {
@@ -851,13 +718,159 @@ const PluginManager = (() => {
 
     // ─────────────────────────────────────────────────────────────────────────
 
+    // =========================================================================
+    //  ОКНО ВЫБОРА ИСТОЧНИКА — открывается при "plugin install" без аргумента
+    //  Drag-n-drop ограничен областью этого окна (не вся страница),
+    //  плюс кнопка выбора файла через системный диалог и поле для URL.
+    // =========================================================================
+
+    function _openFilePickerWindow(terminal) {
+        const winId = 'plugin-install-pick';
+
+        const html = `
+<style>
+.pf-wrap{display:flex;flex-direction:column;gap:14px;padding:2px 0}
+.pf-zone{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:9px;
+    padding:34px 18px;
+    border:2px dashed rgba(0,200,100,.35);
+    background:rgba(0,200,100,.03);
+    color:rgba(0,200,100,.75);
+    font-family:var(--mono-font,monospace);
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s, background .15s, color .15s;
+}
+.pf-zone.drag{ border-color:rgba(0,200,100,.8); background:rgba(0,200,100,.09); }
+.pf-zone.reject{
+    border-color:rgba(255,50,80,.55);
+    background:rgba(255,50,80,.06);
+    color:rgba(255,80,100,.85);
+}
+.pf-icon{font-size:2.1em;animation:pf-bob 1.6s ease-in-out infinite}
+@keyframes pf-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.pf-title{font-size:.74em;letter-spacing:2px;text-transform:uppercase}
+.pf-sub{font-size:.6em;letter-spacing:1.5px;color:rgba(0,200,100,.4)}
+.pf-zone.reject .pf-sub{color:rgba(255,80,100,.55)}
+.pf-or{
+    display:flex;align-items:center;gap:10px;
+    font-size:.6em;letter-spacing:2px;color:rgba(150,150,150,.4);
+}
+.pf-or::before,.pf-or::after{content:'';flex:1;height:1px;background:rgba(255,255,255,.08)}
+.pf-url-row{display:flex;gap:8px}
+.pf-url-input{
+    flex:1;
+    background:rgba(0,0,0,.25);
+    border:1px solid rgba(0,200,100,.25);
+    color:#aee8c4;
+    font-family:var(--mono-font,monospace);
+    font-size:.72em;
+    padding:8px 10px;
+    outline:none;
+    transition:border-color .15s;
+}
+.pf-url-input:focus{border-color:rgba(0,200,100,.55)}
+.pf-url-btn{
+    background:rgba(0,200,100,.08);
+    border:1px solid rgba(0,200,100,.3);
+    color:rgba(0,200,100,.85);
+    font-family:var(--mono-font,monospace);
+    font-size:.68em;letter-spacing:1.5px;
+    padding:0 16px;
+    cursor:pointer;
+    transition:background .15s;
+}
+.pf-url-btn:hover{background:rgba(0,200,100,.16)}
+</style>
+<div class="pf-wrap">
+  <label class="pf-zone" id="pf-zone">
+    <input type="file" id="pf-file-input" accept=".js" style="display:none">
+    <div class="pf-icon">⇩</div>
+    <div class="pf-title">ПЕРЕТАЩИТЕ .JS ФАЙЛ СЮДА</div>
+    <div class="pf-sub">ИЛИ НАЖМИТЕ ДЛЯ ВЫБОРА · ДО 2 МБ</div>
+  </label>
+  <div class="pf-or">URL</div>
+  <div class="pf-url-row">
+    <input type="text" class="pf-url-input" id="pf-url-input" placeholder="https://example.com/plugin.js" autocomplete="off" spellcheck="false">
+    <button class="pf-url-btn" id="pf-url-btn">УСТАНОВИТЬ</button>
+  </div>
+</div>`;
+
+        WindowManager.open(winId, 'УСТАНОВКА ПЛАГИНА', html, {
+            width:   380,
+            minSize: 40,
+            maxSize: 280,
+            status:  'PLUGIN MANAGER · ВЫБЕРИТЕ ИСТОЧНИК',
+        });
+
+        requestAnimationFrame(() => {
+            const win = document.querySelector(`.lyoko-window[data-id="${winId}"]`);
+            if (!win) return;
+
+            const zone      = win.querySelector('#pf-zone');
+            const fileInput = win.querySelector('#pf-file-input');
+            const urlInput  = win.querySelector('#pf-url-input');
+            const urlBtn    = win.querySelector('#pf-url-btn');
+
+            let rejectTimer = null;
+            function flashReject(msg) {
+                zone.classList.add('reject');
+                clearTimeout(rejectTimer);
+                rejectTimer = setTimeout(() => zone.classList.remove('reject'), 650);
+                if (msg) terminal.printError(msg);
+            }
+
+            async function handleFile(file) {
+                if (!file) return;
+                if (!/\.js$/i.test(file.name)) {
+                    flashReject(`PLUGIN INSTALL: неверный тип файла "${file.name}" — ожидается .js`);
+                    return;
+                }
+                WindowManager.close(winId);
+                await installFromFile(file, terminal);
+            }
+
+            // Выбор через системный диалог (клик по зоне → скрытый <input type="file">)
+            fileInput.addEventListener('change', () => handleFile(fileInput.files?.[0]));
+
+            // Drag-n-drop — ограничен только этой зоной, не всей страницей
+            ['dragenter', 'dragover'].forEach(evt =>
+                zone.addEventListener(evt, e => {
+                    e.preventDefault();
+                    zone.classList.add('drag');
+                })
+            );
+            zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+            zone.addEventListener('drop', e => {
+                e.preventDefault();
+                zone.classList.remove('drag');
+                const files = Array.from(e.dataTransfer.files || []);
+                const file  = files.find(f => /\.js$/i.test(f.name)) || files[0];
+                handleFile(file);
+            });
+
+            // Альтернатива — установка по URL прямо из этого же окна
+            async function submitUrl() {
+                const val = urlInput.value.trim();
+                if (!val) { urlInput.focus(); return; }
+                WindowManager.close(winId);
+                await install(val, terminal);
+            }
+            urlBtn.addEventListener('click', submitUrl);
+            urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitUrl(); });
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
      * Устанавливает плагин по прямой ссылке на JS-файл.
+     * Без аргумента — открывает окно выбора источника (drag-n-drop / файл / URL).
      */
     async function install(url, terminal) {
         if (!url) {
-            terminal.printError('PLUGIN INSTALL: укажите URL');
-            terminal.printSystem('  Пример: plugin install https://example.com/my-plugin.js');
+            _openFilePickerWindow(terminal);
             return;
         }
 
