@@ -98,6 +98,7 @@ const GlitchFX = (() => {
             slices     = true,
             colorShift = true,
             scanFlash  = true,
+            easing     = 'ease-out',   // 'ease-out' | 'ease-in-out' | 'ease-in'
         } = opts;
 
         // Отменяем предыдущую анимацию если ещё идёт
@@ -125,7 +126,7 @@ const GlitchFX = (() => {
 
             // Огибающая: резкий пик в начале, затухает
             // Пики случайны — не монотонно
-            const env = Math.pow(1 - t, 0.6) * (0.5 + 0.5 * Math.random());
+            const env = _envelope(t, easing) * (0.5 + 0.5 * Math.random());
 
             // ── Дисторшн (SVG фильтр) ──
             const scale = intensity * env * (0.3 + 0.7 * Math.random());
@@ -274,10 +275,223 @@ const GlitchFX = (() => {
 
     function isLooping() { return _isLooping; }
 
+    // ── Slice-эффект ──────────────────────────────────────────────────────────
+    //
+    //  Разрезает экран на горизонтальные (или вертикальные) полосы и смещает
+    //  каждую независимо по X / Y — точно как glitch-transition в видеоредакторах.
+    //
+    //  Технически: feComponentTransfer type="discrete" квантует плавный шум
+    //  в N ступеней с чёткими краями → каждая ступень = один слайс с постоянным
+    //  displacement. Seed меняется на каждом кадре → полосы "прыгают".
+    //
+    //  opts:
+    //    direction  : 'x' | 'y' | 'both'  (default: 'x')
+    //    sliceCount : 4..24               (default: 10)  — кол-во полос
+    //    intensity  : 1..200              (default: 80)  — макс. смещение в px
+    //    duration   : мс                 (default: 700)
+    //    colorShift : boolean             (default: true)
+    //    jumpRate   : 0..1               (default: 0.35) — вероятность смены seed/таблицы каждый кадр
+
+    const SLICE_FILTER_ID = 'glitch-slice-filter';
+
+    // Строит массив дискретных значений для feComponentTransfer.
+    // Значения намеренно НЕ монотонные — так слайсы разлетаются в разные стороны
+    // (0.5 = нейтрально, <0.5 = влево/вверх, >0.5 = вправо/вниз).
+    // Огибающая интенсивности — определяет форму нарастания/затухания эффекта.
+    // t ∈ [0, 1].  Случайное дрожание накладывается поверх в вызывающем коде.
+    //
+    //   'ease-out'     — мгновенный удар, затухание (поведение по умолчанию)
+    //   'ease-in-out'  — плавное нарастание, пик в середине, плавное затухание
+    //   'ease-in'      — нарастание к пику в конце, затем резкий обрыв
+    function _envelope(t, easing) {
+        switch (easing) {
+            case 'ease-in-out':
+                // sin(π·t): ноль на краях, единица в центре — идеальная колоколообразная кривая
+                return Math.sin(Math.PI * t);
+            case 'ease-in':
+                // Зеркальное ease-out: нарастает к концу
+                return Math.pow(t, 0.55);
+            default: // 'ease-out'
+                return Math.pow(1 - t, 0.55);
+        }
+    }
+
+    function _buildSliceTable(count) {
+        const v = [];
+        for (let i = 0; i < count; i++) {
+            // Кластеры у краёв диапазона → резкие смещения в обе стороны,
+            // несколько нейтральных полос ближе к центру для контраста.
+            const r = Math.random();
+            if      (r < 0.3) v.push((Math.random() * 0.22).toFixed(3));      // сильно влево
+            else if (r < 0.6) v.push((0.78 + Math.random() * 0.22).toFixed(3)); // сильно вправо
+            else              v.push((0.40 + Math.random() * 0.20).toFixed(3)); // почти нейтрально
+        }
+        return v.join(' ');
+    }
+
+    // Создаёт (один раз) отдельный SVG-фильтр для slice-эффекта.
+    // Если фильтр уже есть — возвращает его ссылки.
+    function _initSliceFilter(direction) {
+        if (document.getElementById(SLICE_FILTER_ID)) {
+            return {
+                turb : document.getElementById('gsl-turbulence'),
+                disp : document.getElementById('gsl-displacement'),
+                funcR: document.getElementById('gsl-func-r'),
+                funcG: document.getElementById('gsl-func-g'),
+            };
+        }
+
+        _init(); // убедимся что основной SVG-контейнер создан
+
+        const defs = document.querySelector('#glitch-svg-defs defs');
+        if (!defs) return null;
+
+        // baseFrequency:
+        //   direction='x' — горизонтальные полосы (высокая частота по Y, 0 по X)
+        //   direction='y' — вертикальные  полосы (высокая частота по X, 0 по Y)
+        //   direction='both' — оба направления
+        const bfx = (direction === 'y' || direction === 'both') ? '0.35' : '0';
+        const bfy = (direction === 'x' || direction === 'both') ? '0.35' : '0';
+
+        // xChannel: 'R' смещает по X если direction='x'|'both', иначе нет смысла
+        // yChannel: 'G' смещает по Y если direction='y'|'both'
+        const xCh = (direction === 'x' || direction === 'both') ? 'R' : 'G';
+        const yCh = (direction === 'y' || direction === 'both') ? 'G' : 'R';
+
+        const f = document.createElementNS(SVG_NS, 'filter');
+        f.setAttribute('id',    SLICE_FILTER_ID);
+        f.setAttribute('x',     '-5%');  // небольшой запас по краям
+        f.setAttribute('y',     '-5%');
+        f.setAttribute('width', '110%');
+        f.setAttribute('height','110%');
+        f.setAttribute('color-interpolation-filters', 'sRGB');
+        f.innerHTML = `
+            <!-- Базовый шум: numOctaves=1 — нет высокочастотного мусора -->
+            <feTurbulence
+                id="gsl-turbulence"
+                type="fractalNoise"
+                baseFrequency="${bfx} ${bfy}"
+                numOctaves="1"
+                seed="1"
+                result="rawNoise"/>
+
+            <!-- Квантизация: discrete превращает плавный градиент в ступени.
+                 R управляет смещением по X, G — по Y.
+                 Нейтральное значение = 0.5 (displacement = 0). -->
+            <feComponentTransfer in="rawNoise" result="qNoise">
+                <feFuncR id="gsl-func-r" type="discrete" tableValues="0.5"/>
+                <feFuncG id="gsl-func-g" type="discrete" tableValues="0.5"/>
+                <feFuncB type="linear" slope="0" intercept="0.5"/>
+            </feComponentTransfer>
+
+            <!-- Displacement: scale=0 = нет эффекта, нарастает в trigger -->
+            <feDisplacementMap
+                id="gsl-displacement"
+                in="SourceGraphic"
+                in2="qNoise"
+                scale="0"
+                xChannelSelector="${xCh}"
+                yChannelSelector="${yCh}"/>
+        `;
+        defs.appendChild(f);
+
+        return {
+            turb : document.getElementById('gsl-turbulence'),
+            disp : document.getElementById('gsl-displacement'),
+            funcR: document.getElementById('gsl-func-r'),
+            funcG: document.getElementById('gsl-func-g'),
+        };
+    }
+
+    // Активный handle для sliceTrigger (чтобы отменять при повторном вызове)
+    let _sliceRafId = null;
+
+    /**
+     * Запустить glitch-slice эффект.
+     *
+     * @param {object} opts
+     * @param {'x'|'y'|'both'} opts.direction   — ось смещения (default: 'x')
+     * @param {number} opts.sliceCount           — кол-во полос 4..24 (default: 10)
+     * @param {number} opts.intensity            — макс. смещение px (default: 80)
+     * @param {number} opts.duration             — длительность мс (default: 700)
+     * @param {boolean} opts.colorShift          — RGB-сдвиг (default: true)
+     * @param {number}  opts.jumpRate            — 0..1, вероятность прыжка в кадре (default: 0.35)
+     */
+    function sliceTrigger(opts = {}) {
+        const {
+            direction  = 'x',
+            sliceCount = 10,
+            intensity  = 80,
+            duration   = 700,
+            colorShift = true,
+            jumpRate   = 0.35,
+            easing     = 'ease-out',   // 'ease-out' | 'ease-in-out' | 'ease-in'
+        } = opts;
+
+        const refs = _initSliceFilter(direction);
+        if (!refs) { console.warn('[GlitchFX] sliceTrigger: SVG defs не найдены'); return; }
+
+        const { turb, disp, funcR, funcG } = refs;
+
+        // Отменяем предыдущий если ещё идёт
+        if (_sliceRafId) { cancelAnimationFrame(_sliceRafId); _sliceRafId = null; }
+
+        const bodyStyle = document.body.style;
+        bodyStyle.filter = `url(#${SLICE_FILTER_ID})`;
+
+        const startTime = performance.now();
+
+        // Первая таблица — сразу хаотичная
+        const initTable = _buildSliceTable(sliceCount);
+        funcR.setAttribute('tableValues', initTable);
+        funcG.setAttribute('tableValues', initTable);
+
+        function frame(now) {
+            const t = Math.min((now - startTime) / duration, 1);
+
+            if (t >= 1) {
+                // Финальная очистка
+                bodyStyle.filter     = '';
+                bodyStyle.textShadow = '';
+                disp.setAttribute('scale', '0');
+                _sliceRafId = null;
+                return;
+            }
+
+            // Огибающая: быстрый резкий удар, плавное затухание
+            // pow < 1 → медленнее затухает в конце (дольше видны слайсы)
+            const env   = _envelope(t, easing) * (0.55 + 0.45 * Math.random());
+            const scale = (intensity * env).toFixed(1);
+            disp.setAttribute('scale', scale);
+
+            // "Прыжок" полос: меняем seed → все полосы сразу перемещаются
+            if (Math.random() < jumpRate) {
+                turb.setAttribute('seed', Math.floor(Math.random() * 300));
+            }
+
+            // Переназначаем дискретные уровни → полосы меняют величину смещения
+            if (Math.random() < jumpRate * 0.7) {
+                const table = _buildSliceTable(sliceCount);
+                if (direction === 'x' || direction === 'both') funcR.setAttribute('tableValues', table);
+                if (direction === 'y' || direction === 'both') funcG.setAttribute('tableValues', table);
+            }
+
+            // RGB-сдвиг: работает независимо от SVG-фильтра, усиливает ощущение цифрового разрыва
+            if (colorShift) {
+                const cs = (intensity * env * 0.12 * Math.random()).toFixed(1);
+                bodyStyle.textShadow = Math.random() < 0.65
+                    ? `${cs}px 0 rgba(255,0,64,0.9), -${cs}px 0 rgba(0,255,200,0.9)`
+                    : '';
+            }
+
+            _sliceRafId = requestAnimationFrame(frame);
+        }
+
+        _sliceRafId = requestAnimationFrame(frame);
+    }
+
     // ── Публичный API ─────────────────────────────────────────────────────────
 
-    return { trigger, loop, stopLoop, isLooping };
+    return { trigger, loop, stopLoop, isLooping, sliceTrigger };
 
 })();
-
-
