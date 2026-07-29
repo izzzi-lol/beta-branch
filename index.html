@@ -160,36 +160,44 @@
 
 </div>
 
-<script src="js/plugin-api.js"></script>
-<script src="js/terminal/commands.js"></script>
-<script src="js/terminal/cmd_upload.js"></script>
-<script src="js/terminal/cmd_get.js"></script>
-<script src="js/terminal/cmd_echo.js"></script>
-<script src="js/terminal/cmd_browse.js"></script>
-<script src="js/terminal/renderer.js"></script>
-<script src="js/terminal/cmd_plugin.js"></script>
-<script src="js/audio-handler.js"></script>
-<script src="js/window-manager.js"></script>
-<script src="js/settings.js"></script>
-<script src="js/glitch.js"></script>
-<script src="js/terminal/main.js"></script>
-<script src="js/plugin-manager.js"></script>
-<script src="js/cabinet.js"></script>
+<!-- JS: PLUGINS — API и менеджер плагинов -->
+    <script src="js/plugins/plugin-api.js"></script>
+    <script src="js/plugins/plugin-manager.js"></script>
 
-<!-- Часики и мем-бар -->
-<script>
-    (function() {
-        function tick() {
-            const el = document.getElementById('meta-clock');
-            if (el) el.textContent = new Date().toLocaleTimeString('en-GB');
-        }
-        tick();
-        setInterval(tick, 1000);
+    <!-- JS: CORE — основной движок сайта -->
+    <script src="js/core/audio-handler.js"></script>
+    <script src="js/core/glitch.js"></script>
+    <script src="js/core/window-manager.js"></script>
 
-        // Случайная "память" для атмосферы
-        const memEl = document.getElementById('bar-mem');
-        if (memEl) memEl.textContent = (Math.floor(Math.random() * 20) + 78) + '%';
-    })();
-</script>
+    <!-- JS: UI — интерфейс и дополнительные окна -->
+    <script src="js/ui/settings.js"></script>
+    <script src="js/ui/cabinet.js"></script>
+
+    <!-- JS: TERMINAL — команды и рендеринг терминала -->
+    <script src="js/terminal/commands.js"></script>
+    <script src="js/terminal/renderer.js"></script>
+    <script src="js/terminal/cmd_get.js"></script>
+    <script src="js/terminal/cmd_echo.js"></script>
+    <script src="js/terminal/cmd_browse.js"></script>
+    <script src="js/terminal/cmd_upload.js"></script>
+    <script src="js/terminal/cmd_plugin.js"></script>
+<!-- JS: MAIN — точка входа приложение -->
+    <script src="js/main.js"></scrip>
+<!-- INLINE JS — часы и память в статус-бар -->
+    <script>
+        (function() {
+            function tick() {
+                const el = document.getElementById('meta-clock');
+                if (el) el.textContent = new Date().toLocaleTimeString('en-GB');
+            }
+
+            tick();
+            setInterval(tick, 1000);
+
+            // Случайная "память" для атмосферы
+            const memEl = document.getElementById('bar-mem');
+            if (memEl) memEl.textContent = (Math.floor(Math.random() * 20) + 78) + '%';
+        })();
+    </script>
 </body>
 </html>

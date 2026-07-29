@@ -44,14 +44,28 @@ const WindowManager = (() => {
     let layer, backdrop;
 
     function _initDOM() {
-        if (layer) return;
-        backdrop = document.createElement('div');
-        backdrop.id = 'wm-backdrop';
+    if (layer) return;
+
+    backdrop = document.createElement('div');
+    backdrop.id = 'wm-backdrop';
+
+    layer = document.createElement('div');
+    layer.id = 'wm-layer';
+
+    if (IS_MOBILE) {
+        const dossierOutput = document.getElementById('dossier-output');
+        if (dossierOutput) {
+            dossierOutput.appendChild(backdrop);
+            dossierOutput.appendChild(layer);
+        } else {
+            document.body.appendChild(backdrop);
+            document.body.appendChild(layer);
+        }
+    } else {
         document.body.appendChild(backdrop);
-        layer = document.createElement('div');
-        layer.id = 'wm-layer';
         document.body.appendChild(layer);
     }
+}
 
     // ── Z-index management ───────────────────────────────────────────────────
     let _zBase    = 500;
@@ -128,25 +142,9 @@ const WindowManager = (() => {
     }
 
     /**
-     * Растягивает окно на весь экран над консолью.
-     * Высота #console-area + #crt-statusbar измеряется динамически.
+     * На мобилке прикрепляет окно к верхнему краю #dossier-output
+     * через position:sticky — окно всегда видно при скролле и не уезжает вниз.
      */
-    function _fitMobile(win) {
-        const consoleEl = document.getElementById('console-area');
-        const statusEl  = document.getElementById('crt-statusbar');
-        const bottomH   = (consoleEl?.offsetHeight ?? 0) + (statusEl?.offsetHeight ?? 0);
-
-        Object.assign(win.style, {
-            position  : 'fixed',
-            left      : '0',
-            top       : '0',
-            right     : '0',
-            bottom    : bottomH + 'px',
-            width     : '100%',
-            height    : '',
-            maxHeight : '',
-        });
-    }
 
     /**
      * Добавляет свайп-навигацию на тайтл-бар (мобайл).
@@ -581,8 +579,7 @@ const WindowManager = (() => {
                 </div>
                 ${opts.status ? `<div class="lyoko-statusbar"><span>${opts.status}</span><span>ID:${id.toUpperCase()}</span></div>` : ''}
             `;
-
-            _fitMobile(win);
+            
             _addMobileSwipe(win, win.querySelector('.lyoko-titlebar'));
 
         } else {
