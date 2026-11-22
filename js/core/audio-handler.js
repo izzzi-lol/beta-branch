@@ -11,28 +11,49 @@
 //    AudioHandler.getEchoVolume()               — громкость ECHO (0–1)
 //    AudioHandler.applyVolumes(cfg)             — применить из настроек
 //
-//  Расширенный API (ECHO и долгие звуки):
-//    AudioHandler.play(src, opts)   → id        — запустить звук с полным контролем
+//  Движок ECHO-воспроизведения (один реестр, один play):
+//    AudioHandler.play(src, opts)   → id        — запустить звук
 //    AudioHandler.stop(id)                      — остановить по ID
 //    AudioHandler.stopAll()                     — остановить все
 //    AudioHandler.seek(id, timeSec)             — перемотать на таймкод
-//    AudioHandler.getElapsed(id)    → number    — сколько секунд проиграно
-//    AudioHandler.getActive()       → Map       — все активные звуки {id → info}
-//    AudioHandler.setPitch(id, rate)            — изменить питч на лету (0.1 – 4.0)
+//    AudioHandler.getElapsed(id)    → number    — позиция (сек, медиа-время)
+//    AudioHandler.getActive()       → Map       — все активные звуки
+//    AudioHandler.setSpeed(id, s)               — темп на лету (голос сохраняется)
+//    AudioHandler.setPitch(id, p)               — высота тона на лету (темп сохраняется)
+//    AudioHandler.setTape(id, tape)             — включить/выключить плёночный режим
+//
+//  Независимые скорость и питч:
+//    speed — темп через audio.playbackRate; preservesPitch = true, поэтому
+//            замедление НЕ искажает голос (нативный time-stretch браузера).
+//    pitch — чистая высота тона через AudioWorklet (js/core/pitch-worklet.js,
+//            фазовый вокодер): темп не меняется. Граф (element → MediaElement-
+//            Source → pitch-shifter → destination) подключается лениво, только
+//            когда pitch ≠ 1, поэтому обычное воспроизведение остаётся
+//            стриминговым и лёгким.
+//    tape  — «плёночный» режим: preservesPitch = false, скорость и высота
+//            меняются вместе (эффект старой плёнки). Параметр pitch при этом
+//            игнорируется.
 //
 //  opts = {
 //    volume:  0..1      (default: _echoVolume)
-//    pitch:   0.1..4.0  (default: 1.0)  — скорость/высота воспроизведения
+//    speed:   0.25..4   (default: 1.0)  — темп, голос сохраняется
+//    pitch:   0.25..4   (default: 1.0)  — высота тона, темп не меняется
+//    tape:    boolean   (default: false) — плёночный режим (pitch игнорируется)
 //    loop:    boolean   (default: false)
 //    id:      string    (default: авто-генерируется)
-//    onEnd:   Function  — callback по завершению
+//    startAt: number    (default: 0)    — начать с этой секунды
+//    onEnd:   Function  — по завершении (в т.ч. после stop)
+//    onFail:  Function  — если аудио не смогло заиграть (нет файла / блок автоплея)
 //  }
 //
+//  Если AudioWorklet недоступен (старый браузер) — pitch тихо игнорируется,
+//  воспроизведение продолжается без него.
+//
 //  Пример:
-//    const id = AudioHandler.play('echoes/01/audio.mp3', { pitch: 1.2, volume: 0.8 });
+//    const id = AudioHandler.play('echoes/01/audio.mp3', { speed: 0.8, pitch: 1.2 });
 //    AudioHandler.seek(id, 30);           // перемотать на 30 сек
-//    AudioHandler.getElapsed(id);         // → 30.4
-//    AudioHandler.setPitch(id, 0.8);      // замедлить
+//    AudioHandler.setSpeed(id, 0.5);      // замедлить без искажения голоса
+//    AudioHandler.setPitch(id, 0.8);      // понизить тон без изменения темпа
 //    AudioHandler.stop(id);
 // =============================================================================
 
@@ -53,12 +74,15 @@ const AudioHandler = (() => {
     let   _echoVolume  = 0.75;
     let   _ambientClone = null;
 
-    // Реестр активных расширенных звуков
-    // id → { audio: HTMLAudioElement, startedAt: Date.now(), seekOffset: number, pitch: number, onEnd: fn }
+    // Единый реестр активных звуков движка:
+    // id → { audio, speed, pitch, tape, volumeScale, onEnd, graph }
+    // graph = { source: MediaElementAudioSourceNode, worklet: AudioWorkletNode } | null
     const _active = new Map();
 
     let _idCounter = 0;
     function _genId() { return `sfx_${++_idCounter}_${Date.now()}`; }
+
+    const _clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
     // ── Предзагрузка ─────────────────────────────────────────────────────────
     function _preload(key, src) {
@@ -92,8 +116,6 @@ const AudioHandler = (() => {
         clone.volume = _uiVolume;
         clone.loop   = (key === 'ambient');
 
-        // Pitch через playbackRate (не требует Web Audio API для простых случаев)
-        // playbackRate меняет и скорость, и питч вместе — для UI-звуков это ок
         clone.play().catch(() => {});
 
         if (key === 'ambient') {
@@ -110,396 +132,304 @@ const AudioHandler = (() => {
         if (cfg.echoVolume != null) _echoVolume = cfg.echoVolume / 100;
         if (_ambientClone) _ambientClone.volume = _uiVolume;
 
-        // Обновляем громкость всех активных расширенных звуков
+        // Громкость всех активных звуков движка (echoVolume работает для ECHO)
         for (const [, entry] of _active) {
-            entry.audio.volume = _echoVolume * (entry.volumeScale ?? 1);
+            entry.audio.volume = _clamp(_echoVolume * (entry.volumeScale ?? 1), 0, 1);
         }
     }
 
     // =========================================================================
-    //  РАСШИРЕННЫЙ API
+    //  WEB AUDIO: ленивый pitch-граф
+    // =========================================================================
+
+    let   _audioCtx      = null;   // единый AudioContext на всю страницу
+    let   _workletLoaded = false;
+    let   _workletFailed = false;  // после первой неудачи pitch не ретраим
+
+    function _getCtx() {
+        if (!_audioCtx || _audioCtx.state === 'closed') {
+            _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        return _audioCtx;
+    }
+
+    /**
+     * Загружает AudioWorklet один раз.
+     * @returns {Promise<boolean>} true — воркет доступен
+     */
+    async function _ensureWorklet() {
+        if (_workletLoaded) return true;
+        if (_workletFailed) return false;
+        try {
+            const ctx = _getCtx();
+            // Путь к воркету — рядом с audio-handler.js
+            await ctx.audioWorklet.addModule('js/core/pitch-worklet.js');
+            _workletLoaded = true;
+            return true;
+        } catch (e) {
+            console.warn('[AudioHandler] AudioWorklet недоступен — pitch игнорируется:', e?.message);
+            _workletFailed = true;
+            return false;
+        }
+    }
+
+    /**
+     * Лениво подключает pitch-граф к активному звуку:
+     * element → MediaElementSource → pitch-shifter (AudioWorklet) → destination.
+     *
+     * До подключения звук идёт напрямую из элемента, поэтому play() вызывается
+     * сразу и жест пользователя не теряется — питч «доезжает» следом.
+     *
+     * @param {string} id
+     * @param {object} entry
+     */
+    async function _attachGraph(id, entry) {
+        const ok = await _ensureWorklet();
+        if (!ok || _active.get(id) !== entry) return;   // остановлен, пока грузился воркет
+        try {
+            const ctx = _getCtx();
+            if (ctx.state === 'suspended') ctx.resume();
+
+            const source  = ctx.createMediaElementSource(entry.audio);
+            const worklet = new AudioWorkletNode(ctx, 'pitch-shifter', {
+                numberOfInputs:  1,
+                numberOfOutputs: 1,
+                processorOptions: { pitch: entry.pitch },
+            });
+            source.connect(worklet);
+            worklet.connect(ctx.destination);
+            entry.graph = { source, worklet };
+        } catch (e) {
+            console.warn('[AudioHandler] pitch-граф не подключился — питч пропущен:', e?.message);
+            entry.pitch = 1;
+        }
+    }
+
+    // =========================================================================
+    //  ДВИЖОК ECHO-ВОСПРОИЗВЕДЕНИЯ
     // =========================================================================
 
     /**
-     * Запустить звук с полным контролем.
-     * Возвращает ID для дальнейшего управления.
+     * Запустить звук. Возвращает ID для дальнейшего управления.
      *
-     * @param {string} src   — URL файла
-     * @param {object} opts
+     * @param {string} src   — URL файла (стриминг, без полной загрузки в память)
+     * @param {object} opts  — см. шапку файла
      * @returns {string}     — ID звука
      */
     function play(src, opts = {}) {
         const {
-            volume      = _echoVolume,
-            pitch       = 1.0,
-            loop        = false,
-            id          = _genId(),
-            startAt     = 0,       // начать с этой секунды
-            onEnd       = null,
+            volume   = _echoVolume,
+            speed    = 1.0,
+            pitch    = 1.0,
+            tape     = false,
+            loop     = false,
+            id       = _genId(),
+            startAt  = 0,
+            onEnd    = null,
+            onFail   = null,
         } = opts;
 
-        // Останавливаем если уже играет с таким ID
+        // Останавливаем, если уже играет с таким ID
         if (_active.has(id)) stop(id);
 
-        const audio = new Audio(src);
-        audio.volume       = Math.max(0, Math.min(1, volume));
-        audio.playbackRate = Math.max(0.1, Math.min(4.0, pitch));
-        audio.loop         = loop;
+        const clSpeed = _clamp(speed, 0.25, 4);
+        // В плёночном режиме высота едет вместе со скоростью — питч не нужен
+        const clPitch = tape ? 1.0 : _clamp(pitch, 0.25, 4);
 
-        if (startAt > 0) audio.currentTime = startAt;
+        const audio = new Audio();
+        // Обязательно ДО установки src: createMediaElementSource требует
+        // CORS-clean источник (raw.githubusercontent.com отдаёт ACAO: *)
+        audio.crossOrigin = 'anonymous';
+        audio.src         = src;
+        audio.preload     = 'auto';
+        audio.volume      = _clamp(volume, 0, 1);
+        audio.loop        = loop;
+        audio.playbackRate = clSpeed;
+        audio.preservesPitch       = !tape;   // скорость без искажения голоса
+        audio.webkitPreservesPitch = !tape;   // старые Safari/Chrome
 
         const entry = {
             audio,
-            // startedAt — момент реального старта воспроизведения (после загрузки)
-            // используем для getElapsed() с учётом seekOffset
-            startedAt:   null,
-            seekOffset:  startAt,  // сколько секунд уже "прошло" до текущего play
-            volumeScale: volume / (_echoVolume || 1),
-            pitch,
+            speed: clSpeed,
+            pitch: clPitch,
+            tape,
+            volumeScale: (_echoVolume > 0) ? volume / _echoVolume : 1,
             onEnd,
+            graph: null,
+            _failed: false,   // onFail срабатывает один раз
         };
 
-        audio.addEventListener('canplay', () => {
-            if (!_active.has(id)) return; // был остановлен пока грузился
-            entry.startedAt = performance.now();
-            audio.play().catch(() => {
-                _active.delete(id);
-            });
-        }, { once: true });
-
         audio.addEventListener('ended', () => {
+            // stop() уже снимает запись и звал onEnd — не звать дважды
+            if (_active.get(id) !== entry) return;
             _active.delete(id);
             onEnd?.();
         }, { once: true });
 
         audio.addEventListener('error', () => {
-            _active.delete(id);
+            _fail(id, entry, onFail);
         }, { once: true });
 
-        audio.load();
+        if (startAt > 0) {
+            audio.addEventListener('loadedmetadata', () => {
+                if (_active.get(id) !== entry) return;
+                try { audio.currentTime = Math.min(startAt, audio.duration || startAt); } catch (_) {}
+            }, { once: true });
+        }
+
         _active.set(id, entry);
+
+        // Питч ≠ 1 → подключаем воркет-граф (асинхронно, звук стартует сразу)
+        if (clPitch !== 1.0) _attachGraph(id, entry);
+
+        audio.load();
+
+        // play() сразу — браузер сам доразуется, когда придут данные.
+        // Вызов ДО любых await сохраняет жест пользователя (UPLOAD).
+        const pr = audio.play();
+        if (pr && pr.catch) {
+            pr.catch(() => _fail(id, entry, onFail));
+        }
+
         return id;
     }
 
+    /** Единая точка «аудио не заиграло» — один вызов на entry, только если он жив. */
+    function _fail(id, entry, onFail) {
+        if (entry._failed) return;
+        // Звук уже остановлен (stop чистит src → браузер кидает error) или
+        // естественным образом завершился — это не «аудио недоступно»
+        if (_active.get(id) !== entry) return;
+        entry._failed = true;
+        _active.delete(id);
+        onFail?.();
+    }
+
     /**
-     * Остановить звук по ID.
+     * Остановить звук по ID (вызывает onEnd).
      */
     function stop(id) {
         const entry = _active.get(id);
         if (!entry) return;
-        entry.audio.pause();
-        entry.audio.src = '';
         _active.delete(id);
+
+        if (entry.graph) {
+            try { entry.graph.source.disconnect(); } catch (_) {}
+            try { entry.graph.worklet.disconnect(); } catch (_) {}
+        }
+        entry.audio.pause();
+        entry.audio.src = '';   // обрываем загрузку из сети
         entry.onEnd?.();
     }
 
     /**
-     * Остановить все активные расширенные звуки.
+     * Остановить все активные звуки.
      */
     function stopAll() {
-        for (const id of _active.keys()) stop(id);
+        for (const id of [..._active.keys()]) stop(id);
     }
 
     /**
-     * Перемотать на нужный таймкод (секунды).
-     * Работает и во время воспроизведения.
-     *
-     * @param {string} id
-     * @param {number} timeSec
+     * Перемотать на нужный таймкод (секунды, медиа-время).
+     * Работает и во время воспроизведения, на любом пути (с графом и без).
      */
     function seek(id, timeSec) {
         const entry = _active.get(id);
         if (!entry) return;
-
-        const t = Math.max(0, timeSec);
-        entry.audio.currentTime = t;
-
-        // Обновляем seekOffset чтобы getElapsed() считал правильно
-        entry.seekOffset  = t;
-        entry.startedAt   = performance.now();
+        try { entry.audio.currentTime = Math.max(0, timeSec); } catch (_) {}
     }
 
     /**
-     * Сколько секунд звук уже проиграл с учётом перемоток.
+     * Позиция звука в секундах (медиа-время — с учётом скорости).
      * Возвращает null если звук не найден.
-     *
-     * @param {string} id
-     * @returns {number|null}
      */
     function getElapsed(id) {
         const entry = _active.get(id);
         if (!entry) return null;
-
-        // Берём currentTime у HTMLAudioElement — браузер сам считает с учётом паузы
         return entry.audio.currentTime;
     }
 
     /**
-     * Изменить питч активного звука на лету.
-     * playbackRate меняет и скорость, и высоту тона одновременно.
-     * Для чистого питча без изменения скорости нужен Web Audio API —
-     * но для ECHO и UI-звуков совмещённый эффект звучит органично.
-     *
+     * Изменить темп на лету (голос сохраняется).
      * @param {string} id
-     * @param {number} rate   — 0.1 (очень низкий) .. 1.0 (норма) .. 4.0 (очень высокий)
+     * @param {number} speed   0.25 (медленно) .. 1.0 (норма) .. 4.0 (быстро)
      */
-    function setPitch(id, rate) {
+    function setSpeed(id, speed) {
         const entry = _active.get(id);
         if (!entry) return;
-        const clamped = Math.max(0.1, Math.min(4.0, rate));
-        entry.audio.playbackRate = clamped;
-        entry.pitch = clamped;
+        entry.speed = _clamp(speed, 0.25, 4);
+        entry.audio.playbackRate = entry.speed;
     }
 
     /**
-     * Список всех активных расширенных звуков.
-     * Возвращает Map: id → { elapsed, pitch, loop, src }
-     *
-     * @returns {Map<string, object>}
+     * Изменить высоту тона на лету (темп не меняется).
+     * В плёночном режиме (tape) питч управляется скоростью — вызов игнорируется.
+     * @param {string} id
+     * @param {number} pitch   0.25 .. 4.0 (1.0 = норма; 2.0 = октава вверх)
+     */
+    function setPitch(id, pitch) {
+        const entry = _active.get(id);
+        if (!entry || entry.tape) return;
+        const v = _clamp(pitch, 0.25, 4);
+        entry.pitch = v;
+        if (entry.graph && !entry.graph.bypassed) {
+            entry.graph.worklet.port.postMessage({ pitch: v });
+        } else if (entry.graph && entry.graph.bypassed) {
+            // Граф был обойдён (tape off → pitch on): возвращаем воркет в цепочку
+            try {
+                entry.graph.source.disconnect();
+                entry.graph.source.connect(entry.graph.worklet);
+                entry.graph.worklet.connect(_getCtx().destination);
+                entry.graph.worklet.port.postMessage({ pitch: v });
+                entry.graph.bypassed = false;
+            } catch (_) {}
+        } else if (v !== 1.0) {
+            _attachGraph(id, entry);   // ленивое подключение при первом живом питче
+        }
+    }
+
+    /**
+     * Включить/выключить плёночный режим у уже играющего звука.
+     * Нужен для UPLOAD: аудио стартует раньше, чем известны метаданные текста
+     * (жест пользователя нельзя терять), поэтому режим применяется на лету.
+     * @param {string} id
+     * @param {boolean} tape
+     */
+    function setTape(id, tape) {
+        const entry = _active.get(id);
+        if (!entry) return;
+        entry.tape = !!tape;
+        entry.audio.preservesPitch       = !entry.tape;
+        entry.audio.webkitPreservesPitch = !entry.tape;
+        if (entry.tape && entry.graph) {
+            // В плёнке питч едет со скоростью — воркет выводим из цепочки
+            // (сам MediaElementSource отсоединить нельзя, но можно направить
+            // его прямо в destination в обход воркета)
+            try {
+                entry.graph.source.disconnect();
+                entry.graph.source.connect(_getCtx().destination);
+                entry.graph.worklet.disconnect();
+                entry.graph.bypassed = true;
+            } catch (_) {}
+        }
+    }
+
+    /**
+     * Список всех активных звуков.
+     * Возвращает Map: id → { elapsed, speed, pitch, tape, loop, volume, src, paused }
      */
     function getActive() {
         const result = new Map();
         for (const [id, entry] of _active) {
             result.set(id, {
                 elapsed: entry.audio.currentTime,
-                pitch:   entry.audio.playbackRate,
+                speed:   entry.speed,
+                pitch:   entry.pitch,
+                tape:    entry.tape,
                 loop:    entry.audio.loop,
                 volume:  entry.audio.volume,
                 src:     entry.audio.src,
                 paused:  entry.audio.paused,
-            });
-        }
-        return result;
-    }
-
-    // =========================================================================
-    //  ЧИСТый PITCH-SHIFT через Web Audio API + AudioWorklet
-    //  Темп не меняется — только высота тона.
-    // =========================================================================
-
-    let   _audioCtx       = null;   // единый AudioContext на всю страницу
-    let   _workletLoaded  = false;  // флаг загрузки воркера
-
-    // Реестр pitch-shifted источников: id → { source, gainNode, ctx, startedAt, offset }
-    const _pitchActive = new Map();
-
-    /**
-     * Получить (или создать) AudioContext.
-     * Браузеры требуют создания только после жеста пользователя.
-     */
-    function _getCtx() {
-        if (!_audioCtx || _audioCtx.state === 'closed') {
-            _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        if (_audioCtx.state === 'suspended') _audioCtx.resume();
-        return _audioCtx;
-    }
-
-    /**
-     * Загрузить AudioWorklet один раз.
-     * @returns {Promise<void>}
-     */
-    async function _loadWorklet() {
-        if (_workletLoaded) return;
-        const ctx = _getCtx();
-        // Путь к воркету — рядом с audio-handler.js
-        await ctx.audioWorklet.addModule('js/core/pitch-worklet.js');
-        _workletLoaded = true;
-    }
-
-    /**
-     * Декодировать аудио-файл в AudioBuffer.
-     * @param {string} src
-     * @returns {Promise<AudioBuffer>}
-     */
-    async function _fetchBuffer(src) {
-        const resp = await fetch(src);
-        const arr  = await resp.arrayBuffer();
-        return _getCtx().decodeAudioData(arr);
-    }
-
-    /**
-     * Воспроизвести звук с чистым pitch-shift (темп не меняется).
-     *
-     * @param {string} src        — URL файла
-     * @param {object} opts
-     * @param {number} opts.pitch — множитель питча: 0.5 = октава вниз, 2.0 = октава вверх (default 1.0)
-     * @param {number} opts.volume — 0..1 (default echoVolume)
-     * @param {boolean} opts.loop
-     * @param {string}  opts.id
-     * @param {number}  opts.startAt — начать с этой секунды
-     * @param {Function} opts.onEnd
-     * @returns {Promise<string>} — ID для управления
-     */
-    async function playWithPitch(src, opts = {}) {
-        const {
-            pitch   = 1.0,
-            volume  = _echoVolume,
-            loop    = false,
-            id      = _genId(),
-            startAt = 0,
-            onEnd   = null,
-        } = opts;
-
-        // Останавливаем предыдущий с тем же ID
-        stopPitch(id);
-
-        await _loadWorklet();
-        const ctx = _getCtx();
-
-        // Декодируем аудио
-        const buffer = await _fetchBuffer(src);
-
-        // Граф: source → pitchNode → gainNode → destination
-        const source    = ctx.createBufferSource();
-        source.buffer   = buffer;
-        source.loop     = loop;
-
-        const gainNode  = ctx.createGain();
-        gainNode.gain.setValueAtTime(Math.max(0, Math.min(1, volume)), ctx.currentTime);
-
-        let pitchNode = null;
-
-        if (Math.abs(pitch - 1.0) > 0.01) {
-            // Создаём фазовый вокодер
-            pitchNode = new AudioWorkletNode(ctx, 'pitch-shifter', {
-                numberOfInputs:  1,
-                numberOfOutputs: 1,
-                processorOptions: {},
-            });
-
-            // Устанавливаем начальный питч
-            pitchNode.port.postMessage({ pitch });
-
-            source.connect(pitchNode);
-            pitchNode.connect(gainNode);
-        } else {
-            // Pitch = 1 — bypass воркета, прямое подключение
-            source.connect(gainNode);
-        }
-
-        gainNode.connect(ctx.destination);
-
-        // Запускаем с нужного таймкода
-        const offset = Math.min(startAt, buffer.duration);
-        source.start(0, offset);
-
-        const entry = {
-            source,
-            pitchNode,
-            gainNode,
-            ctx,
-            buffer,
-            startedAt:   ctx.currentTime - offset,
-            currentPitch: pitch,
-            loop,
-            onEnd,
-        };
-
-        source.addEventListener('ended', () => {
-            if (_pitchActive.get(id) === entry) {
-                _pitchActive.delete(id);
-            }
-            onEnd?.();
-        });
-
-        _pitchActive.set(id, entry);
-        return id;
-    }
-
-    /**
-     * Изменить питч активного pitch-shifted звука на лету.
-     * @param {string} id
-     * @param {number} pitch
-     */
-    function setPitchLive(id, pitch) {
-        const entry = _pitchActive.get(id);
-        if (!entry?.pitchNode) return;
-        entry.pitchNode.port.postMessage({ pitch: Math.max(0.25, Math.min(4.0, pitch)) });
-        entry.currentPitch = pitch;
-    }
-
-    /**
-     * Перемотать pitch-shifted звук на таймкод.
-     * (Перезапускает source с нового offset — единственный способ в Web Audio API)
-     * @param {string} id
-     * @param {number} timeSec
-     */
-    async function seekPitch(id, timeSec) {
-        const entry = _pitchActive.get(id);
-        if (!entry) return;
-
-        const { buffer, currentPitch, gainNode, loop, onEnd } = entry;
-        const volume = gainNode.gain.value;
-
-        // Останавливаем текущий source
-        try { entry.source.stop(); } catch (_) {}
-        entry.source.disconnect();
-
-        // Создаём новый source с той же позицией в графе
-        const ctx    = _getCtx();
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.loop   = loop;
-
-        const offset = Math.max(0, Math.min(timeSec, buffer.duration));
-
-        if (entry.pitchNode) {
-            source.connect(entry.pitchNode);
-        } else {
-            source.connect(gainNode);
-        }
-
-        source.start(0, offset);
-        entry.source     = source;
-        entry.startedAt  = ctx.currentTime - offset;
-
-        source.addEventListener('ended', () => {
-            if (_pitchActive.get(id) === entry) _pitchActive.delete(id);
-            onEnd?.();
-        });
-    }
-
-    /**
-     * Сколько секунд проиграл pitch-shifted звук.
-     * @param {string} id
-     * @returns {number|null}
-     */
-    function getElapsedPitch(id) {
-        const entry = _pitchActive.get(id);
-        if (!entry) return null;
-        const elapsed = _getCtx().currentTime - entry.startedAt;
-        if (entry.loop) return elapsed % entry.buffer.duration;
-        return Math.min(elapsed, entry.buffer.duration);
-    }
-
-    /**
-     * Остановить pitch-shifted звук.
-     * @param {string} id
-     */
-    function stopPitch(id) {
-        const entry = _pitchActive.get(id);
-        if (!entry) return;
-        try { entry.source.stop(); } catch (_) {}
-        entry.source.disconnect();
-        entry.gainNode.disconnect();
-        _pitchActive.delete(id);
-        entry.onEnd?.();
-    }
-
-    /**
-     * Все активные pitch-shifted звуки.
-     * @returns {Map<string, object>}
-     */
-    function getActivePitch() {
-        const result = new Map();
-        for (const [id, entry] of _pitchActive) {
-            result.set(id, {
-                elapsed:  getElapsedPitch(id),
-                pitch:    entry.currentPitch,
-                loop:     entry.loop,
-                volume:   entry.gainNode.gain.value,
-                duration: entry.buffer.duration,
             });
         }
         return result;
@@ -512,21 +442,16 @@ const AudioHandler = (() => {
         playUI,
         getEchoVolume,
         applyVolumes,
-        // Расширенный (HTMLAudioElement — скорость + питч вместе)
-        play,
-        stop,
-        stopAll,
-        seek,
-        getElapsed,
-        getActive,
-        setPitch,
-        // Чистый pitch-shift (Web Audio API + Phase Vocoder)
-        playWithPitch,   // async (src, opts) → id
-        stopPitch,       // (id)
-        seekPitch,       // async (id, timeSec)
-        setPitchLive,    // (id, pitch) — на лету без перезапуска
-        getElapsedPitch, // (id) → number
-        getActivePitch,  // () → Map
+        // Движок воспроизведения (единый реестр)
+        play,        // (src, opts) → id
+        stop,        // (id)
+        stopAll,     // ()
+        seek,        // (id, timeSec)
+        getElapsed,  // (id) → number|null
+        getActive,   // () → Map
+        setSpeed,    // (id, speed)  — темп на лету, голос сохраняется
+        setPitch,    // (id, pitch)  — высота тона на лету, темп сохраняется
+        setTape,     // (id, tape)   — плёночный режим на лету
     };
 
 })();

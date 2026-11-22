@@ -14,7 +14,6 @@ const RAW_BASE = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO
 
 // Токен хранится в двойном base64 — не идеальная защита, но лучше, чем plaintext.
 // В продакшене лучше проксировать через свой backend.
-const GITHUB_TOKEN = "WjJsMGFIVmlYM0JoZEY4eE1VSlBVVU5KTjFrd1ZsVmxZVEZZTjJJNFVYZFlYM0p6TlROQlprdHNUSEJTVjA1U1JESlBjVzFLZVdjMGRHNXdPR0UzZVdGRGQyTnNNRWhNTkdOeWFtUk9UVWRRTnpkR1VUVlFRM2xtVTNGMQ==";
 
 const CmdGet = {
     // Кэш последних результатов поиска (для команды GET recent)
@@ -27,7 +26,6 @@ const CmdGet = {
     /** Стандартные заголовки для всех запросов к GitHub API. */
     _apiHeaders() {
         return {
-            'Authorization':        `Bearer ${atob(atob(GITHUB_TOKEN))}`,
             'Accept':               'application/vnd.github+json',
             'X-GitHub-Api-Version': '2022-11-28',
         };
@@ -73,7 +71,7 @@ const CmdGet = {
 
             if (!response.ok) {
                 const errorMessages = {
-                    401: "ОШИБКА API: Токен недействителен или не указан.",
+                    401: "ОШИБКА API: Доступ запрещён (401).",
                     403: "ОШИБКА API: Превышен лимит запросов. Попробуйте позже.",
                     404: "ОШИБКА API: Репозиторий или папка не найдены. Проверьте GITHUB_USER / GITHUB_REPO / DOSSIERS_ROOT.",
                 };

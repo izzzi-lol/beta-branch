@@ -7,6 +7,12 @@
 //    WindowManager.close(id)                           → закрыть окно
 //    WindowManager.closeAll()                          → закрыть все окна
 //    WindowManager.setContent(id, html)                → обновить контент
+//    WindowManager.minimize(id)                        → свернуть в таскбар (desktop)
+//    WindowManager.restore(id)                         → развернуть из таскбара (desktop)
+//    WindowManager.focus(id)                           → сфокусировать (разворачивает свернутое)
+//    WindowManager.list()                              → [{id, title, minimized, focused}]
+//    WindowManager.on(event, cb)                       → подписка: open/close/focus/minimize/restore
+//    WindowManager.setBottomInset(px)                  → высота таскбара для границ drag/maximize
 //
 //  opts = {
 //    width:       number,  // (desktop) начальная ширина (px), default: 420
@@ -70,14 +76,67 @@ const WindowManager = (() => {
     // ── Z-index management ───────────────────────────────────────────────────
     let _zBase    = 500;
     let _zCounter = 0;
-    const _windows = {}; // id → { el, title, opts }
+    const _windows = {}; // id → { el, title, opts, minimized }
     let _mobileActiveId = null;
 
+    // ── События (для таскбара и оболочки SCIPNET OS) ─────────────────────────
+    //  WindowManager.on('open'|'close'|'focus'|'minimize'|'restore', cb)
+    const _listeners = { open: [], close: [], focus: [], minimize: [], restore: [] };
+    function _emit(event, detail) {
+        (_listeners[event] || []).forEach(cb => {
+            try { cb(detail); } catch (e) { console.error(`[WM] listener "${event}":`, e); }
+        });
+    }
+
+    // ── Нижняя вставка: высота таскбара ──────────────────────────────────────
+    //  Границы перетаскивания и maximize не должны залезать под таскбар.
+    let _bottomInset = 0;
+
+    // ── Персистенс позиций окон (desktop) ────────────────────────────────────
+    const WM_STATE_KEY = 'scipnet_wm_state';
+    let _stateSaveTimer = null;
+    function _scheduleStateSave() {
+        if (IS_MOBILE) return;
+        clearTimeout(_stateSaveTimer);
+        _stateSaveTimer = setTimeout(_saveState, 350);
+    }
+    function _saveState() {
+        try {
+            const state = {};
+            for (const [id, w] of Object.entries(_windows)) {
+                const content = w.el.querySelector('.lyoko-content');
+                const h = content ? parseInt(content.style.maxHeight) : NaN;
+                state[id] = {
+                    x: parseInt(w.el.style.left) || 0,
+                    y: parseInt(w.el.style.top)  || 0,
+                    // Размер сохраняем только для ресайзимых окон —
+                    // фиксированные (changelogs, settings) восстанавливают его из opts
+                    w: (w.opts.isResizable === false) ? null : (parseInt(w.el.style.width) || null),
+                    h: (w.opts.isResizable === false) ? null : (isNaN(h) ? null : h),
+                };
+            }
+            localStorage.setItem(WM_STATE_KEY, JSON.stringify(state));
+        } catch (_) { /* localStorage недоступен — состояние не сохраняем */ }
+    }
+    function _loadState() {
+        try { return JSON.parse(localStorage.getItem(WM_STATE_KEY)) || {}; }
+        catch (_) { return {}; }
+    }
+    /** Клэмпит позицию окна размером w×(h+chrome) внутрь вьюпорта над таскбаром. */
+    function _clampPos(x, y, w, h) {
+        return {
+            x: Math.max(0, Math.min(x, window.innerWidth  - w - 20)),
+            y: Math.max(0, Math.min(y, window.innerHeight - h - 40 - _bottomInset)),
+        };
+    }
+
     function _bringToFront(el) {
+        const wasActive = el.classList.contains('active');
         _zCounter++;
         el.style.zIndex = _zBase + _zCounter;
         layer.querySelectorAll('.lyoko-window').forEach(w => w.classList.remove('active'));
         el.classList.add('active');
+        if (!wasActive) _emit('focus', { id: el.dataset.id });
     }
 
     // ── Desktop: каскадное позиционирование ──────────────────────────────────
@@ -88,7 +147,7 @@ const WindowManager = (() => {
         _cascadeOffset = (_cascadeOffset + 28) % 112;
         return {
             x: Math.max(0, Math.min(cx, window.innerWidth  - width  - 20)),
-            y: Math.max(0, Math.min(cy, window.innerHeight - height - 40)),
+            y: Math.max(0, Math.min(cy, window.innerHeight - height - 40 - _bottomInset)),
         };
     }
 
@@ -208,11 +267,12 @@ const WindowManager = (() => {
                 _dragRaf = requestAnimationFrame(() => {
                     _dragRaf = null;
                     win.style.left = Math.max(0, Math.min(_pendingX, window.innerWidth  - winW)) + 'px';
-                    win.style.top  = Math.max(0, Math.min(_pendingY, window.innerHeight - winH)) + 'px';
+                    win.style.top  = Math.max(0, Math.min(_pendingY, window.innerHeight - winH - _bottomInset)) + 'px';
                 });
             };
             const onUp = () => {
                 if (_dragRaf) { cancelAnimationFrame(_dragRaf); _dragRaf = null; }
+                _scheduleStateSave();
                 document.body.style.cursor = '';
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup',   onUp);
@@ -303,11 +363,11 @@ const WindowManager = (() => {
             };
 
             const vw = window.innerWidth;
-            const vh = window.innerHeight;
+            const availH = window.innerHeight - _bottomInset;
             const targetW = Math.min(opts.maxWidth  ?? vw,  vw  - 20);
-            const targetH = Math.min(opts.maxHeight ?? opts.maxSize ?? (vh - 60), vh - 40);
+            const targetH = Math.min(opts.maxHeight ?? opts.maxSize ?? (availH - 60), availH - 40);
             const cx = Math.max(0, Math.round((vw - targetW) / 2));
-            const cy = Math.max(0, Math.round((vh - targetH) / 2));
+            const cy = Math.max(0, Math.round((availH - targetH) / 2));
 
             win.style.transition    = TRANS;
             win.style.maxWidth      = '';          // снимаем ограничение maxWidth
@@ -317,7 +377,8 @@ const WindowManager = (() => {
             content.style.overflow  = '';
             _setContentHeight(content, targetH);
 
-            if (!opts.backdrop) backdrop.classList.toggle('visible', true);
+            _updateBackdrop();
+            _scheduleStateSave();
 
             _isMax = true;
             win.classList.add('wm-maximized');
@@ -340,11 +401,8 @@ const WindowManager = (() => {
             if (opts.maxWidth) win.style.maxWidth = opts.maxWidth + 'px';
 
             win.classList.remove('wm-maximized');
-            if (!opts.backdrop) {
-                // Прячем backdrop только если больше нет развёрнутых окон
-                const anyMaximized = layer.querySelectorAll('.wm-maximized').length > 0;
-                if (!anyMaximized) backdrop.classList.toggle('visible', false);
-            }
+            _updateBackdrop();
+            _scheduleStateSave();
 
             _isMax = false;
             btn.innerHTML = '⊞';
@@ -434,6 +492,7 @@ const WindowManager = (() => {
 
                 const onUp = () => {
                     if (_resizeRaf) { cancelAnimationFrame(_resizeRaf); _resizeRaf = null; }
+                    _scheduleStateSave();
 
                     // ── Применяем финальный размер к окну ───────────────────
                     if (doW) win.style.width = _pendingW + 'px';
@@ -625,8 +684,11 @@ const WindowManager = (() => {
     }
 
     // ── Backdrop ─────────────────────────────────────────────────────────────
+    //  Затемнение видно, пока есть хотя бы одно НЕсвернутое окно с opts.backdrop
+    //  или в развернутом (maximized) состоянии.
     function _updateBackdrop() {
-        const anyBackdrop = Object.values(_windows).some(w => w.opts.backdrop);
+        const anyBackdrop = Object.values(_windows).some(w =>
+            !w.minimized && (w.opts.backdrop || w.el.classList.contains('wm-maximized')));
         backdrop.classList.toggle('visible', anyBackdrop);
     }
 
@@ -637,16 +699,38 @@ const WindowManager = (() => {
     function open(id, title, contentHTML, opts = {}) {
         _initDOM();
 
-        // Окно уже открыто → обновляем контент, выносим вперёд
+        // Окно уже открыто → обновляем контент, выносим вперёд (и разворачиваем)
         if (_windows[id]) {
             setContent(id, contentHTML);
-            IS_MOBILE ? _switchToWindow(id) : _bringToFront(_windows[id].el);
+            if (IS_MOBILE) {
+                _switchToWindow(id);
+            } else {
+                if (_windows[id].minimized) {
+                    _unminimize(id);
+                    _emit('restore', { id });
+                } else {
+                    _bringToFront(_windows[id].el);
+                }
+            }
+            _emit('open', { id, title });
             return;
+        }
+
+        // Desktop: восстанавливаем последнюю позицию/размер окна (если были)
+        if (!IS_MOBILE) {
+            const saved = _loadState()[id];
+            if (saved) {
+                if (saved.w && !opts.maxWidth) opts.width = Math.min(saved.w, window.innerWidth - 20);
+                if (saved.h && opts.isResizable !== false) opts.height = saved.h;
+                const pos = _clampPos(saved.x, saved.y, opts.width || 420, (opts.height || 480) + 60);
+                opts.x = pos.x;
+                opts.y = pos.y;
+            }
         }
 
         const win = _buildWindow(id, title, contentHTML, opts);
         layer.appendChild(win);
-        _windows[id] = { el: win, title, opts };
+        _windows[id] = { el: win, title, opts, minimized: false };
 
         if (IS_MOBILE) {
             _mobileActiveId = id;
@@ -658,6 +742,8 @@ const WindowManager = (() => {
 
         _updateBackdrop();
         AudioHandler.playUI('open');
+        _scheduleStateSave();
+        _emit('open', { id, title });
 
         const wrapper = win.querySelector('.lyoko-content-wrapper');
         _animateOpen(win, wrapper);
@@ -673,6 +759,7 @@ const WindowManager = (() => {
         // Удаляем из реестра сразу — повторный close(id) вернётся здесь
         delete _windows[id];
         _updateBackdrop();
+        _emit('close', { id });
 
         AudioHandler.playUI('close');
 
@@ -703,6 +790,70 @@ const WindowManager = (() => {
         if (content) content.innerHTML = html;
     }
 
-    return { open, close, closeAll, setContent };
+    // ── Свернуть в таскбар (desktop) ─────────────────────────────────────────
+    function minimize(id) {
+        const entry = _windows[id];
+        if (!entry || IS_MOBILE || entry.minimized) return;
+        entry.minimized = true;
+        entry.el.style.display = 'none';
+        AudioHandler.playUI('minimize');
+        _updateBackdrop();
+        _emit('minimize', { id });
+    }
+
+    /** Внутреннее: вернуть окно на экран (без звука и события). */
+    function _unminimize(id) {
+        const entry = _windows[id];
+        if (!entry || !entry.minimized) return;
+        entry.minimized = false;
+        entry.el.style.display = '';
+        _bringToFront(entry.el);
+        _updateBackdrop(); // backdrop от окон с opts.backdrop должен вернуться
+    }
+
+    function restore(id) {
+        const entry = _windows[id];
+        if (!entry || IS_MOBILE) return;
+        if (!entry.minimized) return;
+        _unminimize(id);
+        AudioHandler.playUI('maximize');
+        _emit('restore', { id });
+    }
+
+    /** Сфокусировать окно; свернутое — сначала развернуть. */
+    function focus(id) {
+        const entry = _windows[id];
+        if (!entry) return;
+        if (IS_MOBILE) { _switchToWindow(id); return; }
+        if (entry.minimized) {
+            _unminimize(id);
+            AudioHandler.playUI('maximize');
+            _emit('restore', { id });
+        } else {
+            _bringToFront(entry.el);
+        }
+    }
+
+    /** Список открытых окон — для кнопок таскбара. */
+    function list() {
+        return Object.entries(_windows).map(([id, w]) => ({
+            id,
+            title: w.title,
+            minimized: !!w.minimized,
+            focused: !w.minimized && w.el.classList.contains('active'),
+        }));
+    }
+
+    /** Подписка на события: 'open' | 'close' | 'focus' | 'minimize' | 'restore'. */
+    function on(event, cb) {
+        if (_listeners[event]) _listeners[event].push(cb);
+    }
+
+    /** Высота таскбара: границы drag/maximize/каскада учитывают её. */
+    function setBottomInset(px) {
+        if (!IS_MOBILE) _bottomInset = Math.max(0, px | 0);
+    }
+
+    return { open, close, closeAll, setContent, minimize, restore, focus, list, on, setBottomInset };
 
 })();

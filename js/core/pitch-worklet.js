@@ -2,76 +2,87 @@
 //  pitch-worklet.js — Phase Vocoder AudioWorkletProcessor
 //
 //  Чистый pitch-shift без изменения темпа.
-//  Алгоритм: STFT → сдвиг частотных бинов → ISTFT → Overlap-Add
+//  Алгоритм: STFT (Hann, N=2048, hop=512) → сдвиг спектра по истинным
+//  частотам (phase-vocoder) → identity phase-locking (фазы неглавных бинов
+//  привязываются к пиковым — спектр не рассыпается в «металл») → ISTFT →
+//  overlap-add с точной нормализацией.
+//
+//  Качество звука против первой версии:
+//    • ноль аллокаций в горячем цикле (главная причина щелчков/треска от GC)
+//    • точная нормализация overlap-add: bypass и обработка выровнены по
+//      громкости (раньше расходились в 1.33×)
+//    • identity phase-locking — меньше металлического призвука на голосе
+//    • смена питча на лету сглаживается (~100 мс) — без щелчков
 //
 //  Загружается через AudioContext.audioWorklet.addModule('pitch-worklet.js')
 //  Управление через MessagePort:
-//    processor.port.postMessage({ pitch: 1.5 })  // сдвиг питча (0.25–4.0)
+//    node.port.postMessage({ pitch: 1.5 })   // сдвиг питча (0.25–4.0)
+//  Начальный питч — через processorOptions: { pitch } (без рампы со старта).
 // =============================================================================
 
 class PitchShifterProcessor extends AudioWorkletProcessor {
 
-    static get parameterDescriptors() {
-        return [{
-            name:         'pitchRatio',
-            defaultValue: 1.0,
-            minValue:     0.25,
-            maxValue:     4.0,
-            automationRate: 'k-rate',
-        }];
-    }
-
     constructor(options) {
         super(options);
 
-        const FFT_SIZE  = 2048;
-        const HOP_SIZE  = FFT_SIZE / 4;   // 512 — оверлэп 75%
+        const FFT_SIZE = 2048;
+        const HOP_SIZE = FFT_SIZE / 4;   // оверлэп 75% (COLA для Hann)
 
-        this._fftSize   = FFT_SIZE;
-        this._hopSize   = HOP_SIZE;
-        this._frameSize = FFT_SIZE;
+        this._fftSize = FFT_SIZE;
+        this._hopSize = HOP_SIZE;
 
-        // Буферы анализа
-        this._analysisBuffer  = new Float32Array(FFT_SIZE);
-        this._synthesisBuffer = new Float32Array(FFT_SIZE * 2); // двойной для OLA
+        // ── Предаллоцированные буферы ────────────────────────────────────────
+        // В process() и _processFrame() НИ ОДНОЙ аллокации — иначе GC рвёт
+        // аудио-поток щелчками.
+        const N    = FFT_SIZE;
+        const half = N / 2;
 
-        // Накопители для входа/выхода
-        this._inputAccum  = new Float32Array(FFT_SIZE * 2);
-        this._outputAccum = new Float32Array(FFT_SIZE * 2);
-        this._inputPtr    = 0;
-        this._outputPtr   = 0;
-        this._filled      = 0;
+        this._inputAccum  = new Float32Array(N * 2);
+        this._outputAccum = new Float32Array(N * 2);
+        this._frame       = new Float32Array(N);   // копия входного фрейма
+        this._re          = new Float32Array(N);   // спектр анализа
+        this._im          = new Float32Array(N);
+        this._outRe       = new Float32Array(N);   // спектр синтеза
+        this._outIm       = new Float32Array(N);
+        this._synthFrame  = new Float32Array(N);   // результат IFFT × окно
 
-        // Фазовое состояние
-        this._lastPhase    = new Float32Array(FFT_SIZE);
-        this._sumPhase     = new Float32Array(FFT_SIZE);
-        this._lastSynthPhase = new Float32Array(FFT_SIZE);
+        this._inputPtr  = 0;
+        this._outputPtr = 0;
 
-        // Окно анализа/синтеза (Hann)
-        this._window = new Float32Array(FFT_SIZE);
-        for (let i = 0; i < FFT_SIZE; i++) {
-            this._window[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / FFT_SIZE));
+        // Окно Ханна
+        this._window = new Float32Array(N);
+        for (let i = 0; i < N; i++) {
+            this._window[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / N));
         }
 
-        // Нормализация OLA
-        const norm = new Float32Array(FFT_SIZE * 2);
-        for (let i = 0; i < FFT_SIZE * 2; i += HOP_SIZE) {
-            for (let j = 0; j < FFT_SIZE && (i + j) < norm.length; j++) {
-                norm[i + j] += this._window[j] * this._window[j];
-            }
-        }
-        this._normFactor = norm;
+        // Точные константы нормализации overlap-add (не эвристика):
+        //   bypass:    Σ_j w(i + jH)      = 2.0 для Hann, H = N/4
+        //   processed: Σ_j w(i + jH)²     = 1.5 (окно стоит с двух сторон)
+        this._NORM_BYPASS = 2.0;
+        this._NORM_PROC   = 1.5;
 
-        // Слушаем сообщения от основного потока (динамическая смена питча)
+        // Фазовое состояние (half+1 бинов — односторонний спектр)
+        this._lastPhase = new Float32Array(half + 1);  // фаза анализа прошлого фрейма
+        this._sumPhase  = new Float32Array(half + 1);  // накопленная фаза синтеза (пики)
+        this._synthPh   = new Float32Array(half + 1);  // итоговая фаза синтеза бина
+        this._mag       = new Float32Array(half + 1);
+        this._phs       = new Float32Array(half + 1);
+        this._trueFreq  = new Float32Array(half + 1);
+        this._peakOf    = new Int32Array(half + 1);    // пик-владелец региона бина
+        this._isPeak    = new Uint8Array(half + 1);
+
+        // Питч: текущий (плавный) и целевой.
+        // Начальное значение — сразу без рампы (processorOptions от движка).
+        const init = options?.processorOptions?.pitch ?? 1.0;
+        this._targetPitch = init;
+        this._pitch       = init;
+
         this.port.onmessage = (e) => {
-            if (e.data?.pitch != null) {
-                // Обновляем параметр через port — AudioParam k-rate делает то же,
-                // но port позволяет обновить без перепланировки
-                this._manualPitch = e.data.pitch;
+            const p = e.data?.pitch;
+            if (typeof p === 'number' && isFinite(p)) {
+                this._targetPitch = Math.min(4.0, Math.max(0.25, p));
             }
         };
-
-        this._manualPitch = null;
     }
 
     // ── FFT (Cooley–Tukey, iterative in-place) ────────────────────────────────
@@ -121,132 +132,171 @@ class PitchShifterProcessor extends AudioWorkletProcessor {
         }
     }
 
-    // ── Один фрейм фазового вокодера ─────────────────────────────────────────
+    // ── Один фрейм фазового вокодера (заполняет this._synthFrame) ────────────
 
-    _processFrame(input, pitch) {
-        const N   = this._fftSize;
-        const hop = this._hopSize;
+    _processFrame(pitch) {
+        const N    = this._fftSize;
+        const hop  = this._hopSize;
+        const half = N / 2;
+        const w    = this._window;
+        const twoPi = 2 * Math.PI;
 
-        // Применяем окно Хана
-        const re = new Float32Array(N);
-        const im = new Float32Array(N);
-        for (let i = 0; i < N; i++) {
-            re[i] = input[i] * this._window[i];
-        }
-
-        // Прямое FFT
+        // Окно анализа + прямое FFT (в предаллоцированные re/im)
+        const re = this._re, im = this._im;
+        const frame = this._frame;
+        for (let i = 0; i < N; i++) re[i] = frame[i] * w[i];
+        im.fill(0);
         this._fft(re, im, false);
 
-        // ── Анализ фаз + сдвиг бинов ─────────────────────────────────────────
-        const freqPerBin = sampleRate / N;
-        const twoPi      = 2 * Math.PI;
+        // ── Анализ: амплитуды, фазы, истинные частоты ─────────────────────────
+        const mag = this._mag, phs = this._phs, tf = this._trueFreq;
+        const lastPh = this._lastPhase;
+        const binHz = sampleRate / N;
 
-        // Спектр с новыми частотами
-        const newRe = new Float32Array(N);
-        const newIm = new Float32Array(N);
-
-        for (let k = 0; k <= N / 2; k++) {
-            const mag   = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
-            const phase = Math.atan2(im[k], re[k]);
+        for (let k = 0; k <= half; k++) {
+            const r = re[k], m = im[k];
+            mag[k] = Math.sqrt(r * r + m * m);
+            const ph = Math.atan2(m, r);
 
             // Истинная частота через разницу фаз
-            let delta = phase - this._lastPhase[k];
-            this._lastPhase[k] = phase;
+            let delta = ph - lastPh[k] - twoPi * k * hop / N;
+            delta -= twoPi * Math.round(delta / twoPi);
+            lastPh[k] = ph;
+            tf[k] = k * binHz + (delta / hop) * (sampleRate / twoPi);
+            phs[k] = ph;
+        }
 
-            // Убираем ожидаемую фазу
-            const expected = twoPi * k * hop / N;
-            delta -= expected;
+        // ── Пики спектра (локальные максимумы) ────────────────────────────────
+        const isPeak = this._isPeak;
+        isPeak.fill(0);
+        isPeak[0] = 1;   // DC — всегда якорь нижнего региона
+        for (let k = 1; k < half; k++) {
+            if (mag[k] > mag[k - 1] && mag[k] >= mag[k + 1]) isPeak[k] = 1;
+        }
+        if (mag[half] > mag[half - 1]) isPeak[half] = 1;
 
-            // Оборачиваем в [-π, π]
-            delta = delta - twoPi * Math.round(delta / twoPi);
+        // Регион бина = ближайший пик слева
+        const peakOf = this._peakOf;
+        let cur = 0;
+        for (let k = 0; k <= half; k++) {
+            if (isPeak[k]) cur = k;
+            peakOf[k] = cur;
+        }
 
-            // Истинная частота бина
-            const trueFreq = (k * freqPerBin) + (delta / hop) * (sampleRate / twoPi);
-
-            // Целевой бин после сдвига питча
-            const targetK = Math.round(k * pitch);
-            if (targetK < 0 || targetK > N / 2) continue;
-
-            // Аккумулируем фазу синтеза
-            this._sumPhase[targetK] += (trueFreq * pitch / sampleRate) * hop * twoPi;
-
-            const synthPhase = this._sumPhase[targetK];
-            newRe[targetK] += mag * Math.cos(synthPhase);
-            newIm[targetK] += mag * Math.sin(synthPhase);
-
-            // Симметричная половина
-            if (targetK > 0 && targetK < N / 2) {
-                newRe[N - targetK] =  newRe[targetK];
-                newIm[N - targetK] = -newIm[targetK];
+        // ── Фаза синтеза ──────────────────────────────────────────────────────
+        const sumPh = this._sumPhase, synthPh = this._synthPh;
+        for (let k = 0; k <= half; k++) {
+            if (isPeak[k]) {
+                // Пик накапливает фазу по истинной частоте, сдвинутой на pitch —
+                // партиал приземляется на частоту tf·pitch
+                sumPh[k] += (tf[k] * pitch / sampleRate) * hop * twoPi;
+                synthPh[k] = sumPh[k];
+            } else {
+                // Identity phase-locking (Laroche–Dolson): фаза бина = фаза
+                // пика региона + исходный относительный офсет. Бины региона
+                // движутся когерентно — без «металла».
+                const p = peakOf[k];
+                synthPh[k] = synthPh[p] + (phs[k] - phs[p]);
             }
         }
 
-        // Обратное FFT
-        this._fft(newRe, newIm, true);
+        // ── Сборка выходного спектра: величина → бин k·pitch (с интерполяцией) ─
+        const outRe = this._outRe, outIm = this._outIm;
+        outRe.fill(0);
+        outIm.fill(0);
 
-        // Окно синтеза + возвращаем результат
-        const out = new Float32Array(N);
-        for (let i = 0; i < N; i++) {
-            out[i] = newRe[i] * this._window[i];
+        for (let k = 0; k <= half; k++) {
+            const m = mag[k];
+            if (m < 1e-9) continue;
+
+            const target = k * pitch;
+            const k0 = Math.floor(target);
+            const frac = target - k0;
+            const ph = synthPh[k];
+            const c = Math.cos(ph), s = Math.sin(ph);
+
+            if (k0 <= half) {
+                outRe[k0] += m * (1 - frac) * c;
+                outIm[k0] += m * (1 - frac) * s;
+            }
+            if (frac > 0 && k0 + 1 <= half) {
+                outRe[k0 + 1] += m * frac * c;
+                outIm[k0 + 1] += m * frac * s;
+            }
         }
-        return out;
+
+        // Сопряжённая симметрия
+        for (let k = 1; k < half; k++) {
+            outRe[N - k] =  outRe[k];
+            outIm[N - k] = -outIm[k];
+        }
+
+        // Обратное FFT + окно синтеза → в предаллоцированный буфер
+        this._fft(outRe, outIm, true);
+        const sf = this._synthFrame;
+        for (let i = 0; i < N; i++) sf[i] = outRe[i] * w[i];
     }
 
-    // ── Основной цикл (вызывается браузером ~2.9мс при 128 samples / 44100Hz) ─
+    // ── Основной цикл (вызывается браузером ~2.9 мс при 128 сэмплов) ──────────
 
-    process(inputs, outputs, parameters) {
+    process(inputs, outputs) {
         const input  = inputs[0]?.[0];
         const output = outputs[0]?.[0];
         if (!input || !output) return true;
 
-        const pitch = this._manualPitch
-            ?? parameters.pitchRatio[0]
-            ?? 1.0;
+        // Плавное приближение к целевому питчу — смена на лету без щелчков
+        const tp = this._targetPitch;
+        let p = this._pitch;
+        if (p !== tp) {
+            p += (tp - p) * 0.15;
+            if (Math.abs(tp - p) < 0.002) p = tp;
+            this._pitch = p;
+        }
 
+        const N    = this._fftSize;
+        const hop  = this._hopSize;
+        const w    = this._window;
+        const frame = this._frame;
         const blockSize = input.length; // обычно 128
-        const N         = this._fftSize;
-        const hop       = this._hopSize;
+        const shifted = p !== 1.0;
 
         // Накапливаем входные сэмплы
         for (let i = 0; i < blockSize; i++) {
             this._inputAccum[this._inputPtr++] = input[i];
         }
 
-        // Обрабатываем полные фреймы
+        // Обрабатываем полные фреймы (шаг анализа = hop)
         while (this._inputPtr >= N) {
-            // Берём фрейм
-            const frame = new Float32Array(N);
             for (let i = 0; i < N; i++) frame[i] = this._inputAccum[i];
 
-            // Сдвигаем буфер
-            this._inputAccum.copyWithin(0, hop);
-            this._inputPtr -= hop;
-
-            if (Math.abs(pitch - 1.0) < 0.001) {
-                // Питч = 1 — bypass, просто OLA без обработки
+            if (shifted) {
+                this._processFrame(p);
+                // Нормализация прямо при накоплении — каждый фрейм делится на
+                // СВОЮ константу, поэтому уровень не прыгает при переходе
+                // через pitch = 1 и при смене режима
+                const sf = this._synthFrame;
+                const norm = 1 / this._NORM_PROC;
                 for (let i = 0; i < N; i++) {
-                    this._outputAccum[this._outputPtr + i] += frame[i] * this._window[i];
+                    this._outputAccum[this._outputPtr + i] += sf[i] * norm;
                 }
             } else {
-                const processed = this._processFrame(frame, pitch);
+                const norm = 1 / this._NORM_BYPASS;
                 for (let i = 0; i < N; i++) {
-                    this._outputAccum[this._outputPtr + i] += processed[i];
+                    this._outputAccum[this._outputPtr + i] += frame[i] * w[i] * norm;
                 }
             }
             this._outputPtr += hop;
-
-            // Нормализуем накопленный выход (убираем амплитудные артефакты OLA)
-            if (this._outputPtr > hop) {
-                const scale = 1 / (N / hop * 0.5 * 0.5); // hann window norm
-                for (let i = 0; i < hop; i++) {
-                    this._outputAccum[i] *= scale;
-                }
-            }
+            this._inputAccum.copyWithin(0, hop);
+            this._inputPtr -= hop;
         }
 
-        // Отдаём готовые сэмплы
-        for (let i = 0; i < blockSize; i++) {
-            output[i] = this._outputAccum[i] || 0;
+        // Отдаём готовые сэмплы (моно-обработка зеркалится во все каналы)
+        const out = outputs[0];
+        for (let ch = 0; ch < out.length; ch++) {
+            const o = out[ch];
+            for (let i = 0; i < blockSize; i++) {
+                o[i] = this._outputAccum[i] || 0;
+            }
         }
 
         // Сдвигаем выходной буфер

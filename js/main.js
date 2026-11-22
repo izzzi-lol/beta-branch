@@ -253,6 +253,13 @@ window.onload = async () => {
         document.getElementById('scp-splash').remove();
     }
     await PluginManager.init();
+
+    // ── SCIPNET OS: оболочка рабочего стола ──────────────────────────────────
+    // Только desktop-браузеры (на мобилке оба init() — no-op).
+    AppRegistry.registerBuiltins();
+    Desktop.init();
+    Taskbar.init();
+
     AudioHandler.playUI('ambient');
     await renderer.render("[SIZE=24][SCP FOUNDATION'S DOSSIER HUB][/SIZE][TIMER=1]",
         output, '', null, false);

@@ -6,6 +6,8 @@
 //    • Инлайн-теги и вложенный Markdown
 //    • [SCROLLSPEED=мс]   — меняет задержку между словами (мс/слово)
 //    • [TIMER=с]          — пауза N секунд (поддерживает дробные значения)
+//    • [AT=с]             — ждать аудио-отметку N (сек позиции записи ECHO)
+//    • [SYNC=нач;кон]…[/SYNC] — распределить слова фразы по аудио-отрезку
 //    • !COM ...           — комментарий, строка полностью игнорируется
 //    • AbortSignal        — чистая отмена воспроизведения на полуслове
 // =============================================================================
@@ -22,9 +24,21 @@ class StepRenderer {
         this.defaultSpeed = defaultSpeed;
         this.currentSpeed = defaultSpeed;
         this._output      = null;   // DOM-узел вывода, устанавливается в render()
+        this._scrollTarget = null;  // Реальный скролл-контейнер (предок _output)
         this._skip        = false;  // Флаг мгновенного вывода (skip-to-end)
         this._charMode    = false;  // Флаг посимвольного вывода ([CHARMODE]/[WORDMODE])
         this._scrollRafId = null;   // RAF-handle для debounced-scroll
+        // Масштаб времени субтитров (default 1). Умножает ВСЕ задержки _delay:
+        // скорость слов, [TIMER], [SCROLLSPEED], параграфные паузы. Ставится
+        // командой ECHO в скорость аудио — замедленная запись и субтитры
+        // остаются синхронны. Обязан быть сброшен в 1 после рендера.
+        this.timeScale    = 1;
+        // Аудио-часы (default null) — инъекция вида () => секунды | null.
+        // Команды ECHO/UPLOAD подставляют позицию играющей записи, и теги
+        // [AT]/[SYNC] ждут именно аудио-время. null / конец записи / пауза
+        // → fallback на идеальные часы субтитров (см. _delayAudio).
+        // Рендер остаётся аудио-agnostic: никакой привязки к AudioHandler.
+        this.audioClock   = null;
         // Самокорректирующийся таймер: компенсирует накопленный drift setTimeout.
         // _clockStart  — performance.now() в момент старта render().
         // _clockExpected — сколько мс должно было пройти по «идеальным» задержкам.
@@ -52,8 +66,25 @@ class StepRenderer {
         if (this._scrollRafId) return;
         this._scrollRafId = requestAnimationFrame(() => {
             this._scrollRafId = null;
-            if (this._output) this._output.scrollTop = this._output.scrollHeight;
+            const el = this._scrollTarget || this._output;
+            if (el) el.scrollTop = el.scrollHeight;
         });
+    }
+
+    /**
+     * Находит ближайший скролл-контейнер для узла вывода.
+     * render() пишет в .dossier-scope (или в контент окна) — эти обёртки
+     * сами не скроллятся, а растут вместе с контентом. Скроллится их
+     * предок: #dossier-output или .lyoko-content окна.
+     */
+    _findScrollTarget(el) {
+        let node = el;
+        while (node && node !== document.body) {
+            const oy = getComputedStyle(node).overflowY;
+            if (oy === 'auto' || oy === 'scroll') return node;
+            node = node.parentElement;
+        }
+        return el;
     }
 
     // =========================================================================
@@ -85,6 +116,10 @@ class StepRenderer {
             // В режиме skip все задержки обнуляются — текст выводится мгновенно
             if (this._skip) return resolve();
 
+            // timeScale растягивает субтитры под замедленное аудио ECHO —
+            // «идеальные часы» идут в масштабированном времени
+            ms = ms * this.timeScale;
+
             this._clockExpected += ms;
             const elapsed   = performance.now() - this._clockStart;
             const corrected = Math.max(0, this._clockExpected - elapsed);
@@ -95,6 +130,87 @@ class StepRenderer {
                 reject(new DOMException('Aborted', 'AbortError'));
             }, { once: true });
         });
+    }
+
+    // =========================================================================
+    //  АУДИО-СИНХРОНИЗАЦИЯ ([AT] / [SYNC])
+    // =========================================================================
+
+    /**
+     * Ожидание аудио-отметки для тегов [AT] / [SYNC].
+     *
+     * Аудио — мастер-часы: ждём, пока injected audioClock() (позиция записи
+     * в секундах) достигнет цели. Если аудио нет (файл не загрузился, заблокирован
+     * автоплей, запись закончилась раньше текста) — цели интерпретируются как
+     * секунды от начала субтитров на «идеальных часах» × timeScale: текст
+     * никогда не зависает. Прерывание (skip/abort) — как у _delay.
+     *
+     * @param {number} targetSec — секунда аудио (медиа-время)
+     */
+    async _delayAudio(targetSec) {
+        if (this._skip) return;
+        if (this._aborted()) {
+            throw new DOMException('Aborted', 'AbortError');
+        }
+
+        const idealMs = targetSec * 1000 * this.timeScale;
+        const clock   = this.audioClock;
+
+        let t = (typeof clock === 'function') ? clock() : null;
+        if (t == null || !isFinite(t)) {
+            await this._delayUntilIdeal(idealMs);   // аудио нет — фолбэк
+            return;
+        }
+        if (t >= targetSec) {
+            this._snapIdealClock(idealMs);
+            return;
+        }
+
+        // Поллинг позиции аудио (шаг 40 мс — на субтитрах незаметен).
+        // «Замёрзшие» часы (аудио встало/на паузе) — уход в фолбэк,
+        // чтобы текст не блокировался навсегда.
+        let last = t;
+        let stalled = false;
+        while (!this._skip && !this._aborted()) {
+            await new Promise(r => setTimeout(r, 40));
+            t = clock();
+            if (t == null || !isFinite(t)) break;         // запись кончилась/остановлена
+            if (t === last) { stalled = true; break; }    // аудио не двигается
+            last = t;
+            if (t >= targetSec) break;
+        }
+        if (this._aborted()) {
+            throw new DOMException('Aborted', 'AbortError');
+        }
+        if (this._skip) return;
+        if (stalled || t == null || !isFinite(t)) {
+            await this._delayUntilIdeal(idealMs);         // дотягиваем по идеальным часам
+            return;
+        }
+        this._snapIdealClock(idealMs);
+    }
+
+    /**
+     * Фолбэк-ожидание до идеального времени субтитров (мс от старта рендера).
+     * Если часы уже зашли дальше цели — мгновенный выход (назад не отматываем).
+     */
+    async _delayUntilIdeal(targetMs) {
+        if (this._skip) return;
+        if (this._aborted()) {
+            throw new DOMException('Aborted', 'AbortError');
+        }
+        if (targetMs > this._clockExpected) {
+            await this._delay(targetMs - this._clockExpected);
+        }
+    }
+
+    /**
+     * Идеальные часы подтягиваются к аудио-цели (только вперёд) — иначе
+     * последующие wall-паузы ([TIMER], скорость слов) сработают залпом,
+     * потому что реальное время уже ушло вперёд идеального.
+     */
+    _snapIdealClock(idealMs) {
+        if (idealMs > this._clockExpected) this._clockExpected = idealMs;
     }
 
     // =========================================================================
@@ -380,6 +496,22 @@ class StepRenderer {
             /\[TIMER=([0-9.]+)\]/gi,
             (_, v) => `<span class="scp-timer-marker" data-delay="${v}" style="display:none"></span>`
         );
+        // [AT=с] — якорь аудио-времени: аниматор дождётся позиции записи
+        // (секунды медиа-времени ECHO/UPLOAD; без аудио — секунды субтитров).
+        text = text.replace(
+            /\[AT=([0-9.]+)\]/gi,
+            (_, v) => `<span class="scp-audio-marker" data-at="${v}" style="display:none"></span>`
+        );
+        // [SYNC=нач;кон]…[/SYNC] — слова фразы распределяются по аудио-отрезку.
+        // Замена на ПАРУ маркеров: содержимое продолжает парситься как обычно
+        // (вложенные теги и глитчи работают). SYNC действует внутри своей строки.
+        text = text.replace(
+            /\[SYNC=([0-9.]+)\s*;\s*([0-9.]+)\]([\s\S]*?)\[\/SYNC\]/gi,
+            (_, s, e, inner) =>
+                `<span class="scp-sync-marker" data-start="${s}" data-end="${e}" style="display:none"></span>` +
+                inner +
+                `<span class="scp-sync-end" style="display:none"></span>`
+        );
 
         const controlRe = /(\[DISABLE=TAGS\]|\[ENABLE=TAGS\]|\[DISABLE=MD\]|\[ENABLE=MD\])/gi;
         const tokens    = text.split(controlRe);
@@ -477,7 +609,10 @@ class StepRenderer {
     }
 
     async _animateElement(el) {
-        const nodes = el.querySelectorAll('.word, .scp-speed-marker, .scp-timer-marker');
+        const nodes = Array.from(el.querySelectorAll(
+            '.word, .scp-speed-marker, .scp-timer-marker, ' +
+            '.scp-audio-marker, .scp-sync-marker, .scp-sync-end'
+        ));
         if (nodes.length > 0) {
             // При скипе — показываем все слова разом без анимации
             if (this._skip) {
@@ -487,7 +622,12 @@ class StepRenderer {
                 el.classList.remove('skip-reveal');
                 return;
             }
-            for (const node of nodes) {
+            // Режим [SYNC=нач;кон]: слова фразы привязаны к аудио-времени
+            // (targets[k] — отметка появления k-го слова). Действует до
+            // [/SYNC] или до конца элемента — через параграфы не переносится.
+            let sync = null;
+            for (let i = 0; i < nodes.length; i++) {
+                const node = nodes[i];
                 if (this._skip) {
                     el.classList.add('skip-reveal');
                     await this._delay(0);
@@ -495,9 +635,36 @@ class StepRenderer {
                     el.classList.remove('skip-reveal');
                     return;
                 }
+                // Якорь [AT=с]: ждать аудио-отметку (фолбэк — идеальные часы)
+                if (node.classList.contains('scp-audio-marker')) {
+                    await this._delayAudio(parseFloat(node.dataset.at));
+                    continue;
+                }
+                // Начало синк-фразы: считаем .word до [/SYNC] и строим цели
+                if (node.classList.contains('scp-sync-marker')) {
+                    const s = parseFloat(node.dataset.start) || 0;
+                    const e = parseFloat(node.dataset.end)   || s;
+                    const words = [];
+                    for (let j = i + 1; j < nodes.length; j++) {
+                        if (nodes[j].classList.contains('scp-sync-end')) break;
+                        if (nodes[j].classList.contains('word')) words.push(nodes[j]);
+                    }
+                    sync = {
+                        // Слово k появляется к s + span*(k+1)/N — последняя
+                        // точно к концу отрезка, первая не раньше начала
+                        targets: words.map((_, k) => s + (e - s) * ((k + 1) / words.length)),
+                        idx: 0,
+                    };
+                    continue;
+                }
+                if (node.classList.contains('scp-sync-end')) {
+                    sync = null;
+                    continue;
+                }
                 // Маркер скорости: меняем currentSpeed и продолжаем без задержки
+                // (внутри [SYNC] пейсинг задаёт аудио — скорость слов не важна)
                 if (node.classList.contains('scp-speed-marker')) {
-                    this.currentSpeed = Math.max(1, parseFloat(node.dataset.speed));
+                    if (!sync) this.currentSpeed = Math.max(1, parseFloat(node.dataset.speed));
                     continue;
                 }
                 // Маркер паузы: ждём N секунд (skip обнуляет задержку)
@@ -506,7 +673,11 @@ class StepRenderer {
                     continue;
                 }
                 node.classList.add('revealed');
-                await this._delay(this.currentSpeed);
+                if (sync && sync.idx < sync.targets.length) {
+                    await this._delayAudio(sync.targets[sync.idx++]);
+                } else {
+                    await this._delay(this.currentSpeed);
+                }
                 this._scheduleScroll();
             }
             // Анимация завершена — ждём конца CSS (0.18s) и чистим спаны
@@ -556,6 +727,7 @@ class StepRenderer {
         // Регулярки вынесены за пределы цикла — не пересоздаются на каждой строке
         const RE_SPEED    = /^\[SCROLLSPEED=([0-9.]+)\]$/i;
         const RE_TIMER    = /^\[TIMER=([0-9.]+)\]$/i;
+        const RE_AT       = /^\[AT=([0-9.]+)\]$/i;
         const RE_CHARMODE = /^\[CHARMODE\]$/i;
         const RE_WORDMODE = /^\[WORDMODE\]$/i;
         const RE_H1       = /^\[H1\]|^#(?!#)/i;
@@ -571,6 +743,7 @@ class StepRenderer {
         output.appendChild(scopeEl);
         const scopedOutput = scopeEl;
         this._output = scopedOutput;
+        this._scrollTarget = this._findScrollTarget(scopedOutput);
 
         if (renderStartEnd) {
             // Маркер начала — вне скоупа (системный элемент)
@@ -597,6 +770,13 @@ class StepRenderer {
                 const timerMatch = RE_TIMER.exec(line);
                 if (timerMatch) {
                     await this._delay(parseFloat(timerMatch[1]) * 1000);
+                    continue;
+                }
+
+                // Строчный [AT=N] — ждать аудио-отметку (позиция записи ECHO)
+                const atMatch = RE_AT.exec(line);
+                if (atMatch) {
+                    await this._delayAudio(parseFloat(atMatch[1]));
                     continue;
                 }
 

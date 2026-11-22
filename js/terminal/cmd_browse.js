@@ -6,7 +6,7 @@
 //
 //  Два режима:
 //    DIRECT — прямой iframe (работает для сайтов без X-Frame-Options)
-//    PROXY  — через corsproxy.io (снимает X-Frame-Options, работает с большинством сайтов)
+//    PROXY  — через api.allorigins.win (снимает X-Frame-Options, работает с большинством сайтов)
 // =============================================================================
 
 const BROWSE_PROXY = 'https://api.allorigins.win/get?url=';

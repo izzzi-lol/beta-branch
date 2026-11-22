@@ -19,6 +19,7 @@ const Settings = (() => {
         terminalFont: 'JetBrains Mono',
         uiVolume:     50,   // громкость UI-звуков (0–100)
         echoVolume:   75,   // громкость ECHO-записей (0–100)
+        desktopMode:  true, // оболочка SCIPNET OS при загрузке (только desktop-браузеры)
     };
 
     // ── Загрузка / сохранение ─────────────────────────────────────────────────
@@ -93,6 +94,9 @@ const Settings = (() => {
                 </div>
                 <div class="lk-nav-item" data-panel="theme">
                     <span class="lk-nav-icon">◉</span> Тема
+                </div>
+                <div class="lk-nav-item" data-panel="desktop">
+                    <span class="lk-nav-icon">▤</span> Стол
                 </div>
                 <div class="lk-nav-item" data-panel="system">
                     <span class="lk-nav-icon">⬡</span> Система
@@ -204,6 +208,35 @@ const Settings = (() => {
                                 <option value="VT323"          ${cfg.terminalFont === 'VT323'          ? 'selected' : ''}>VT323 (ретро)</option>
                                 <option value="Courier New"    ${cfg.terminalFont === 'Courier New'    ? 'selected' : ''}>Courier New</option>
                             </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Рабочий стол ── -->
+                <div class="lk-panel" data-panel="desktop">
+                    <div>
+                        <div class="lk-group-label">Оболочка</div>
+                        <div class="lk-row">
+                            <div>
+                                <div class="lk-label">Рабочий стол</div>
+                                <div class="lk-hint">Оконный режим вместо терминала</div>
+                            </div>
+                            <div class="lk-toggle ${cfg.desktopMode ? 'on' : ''}" data-key="desktopMode"></div>
+                        </div>
+                        <div class="lk-row">
+                            <div>
+                                <div class="lk-label">Раскладка иконок</div>
+                                <div class="lk-hint">Вернуть иконки на исходные места</div>
+                            </div>
+                            <button class="lk-btn" id="lk-reset-icons">Сброс</button>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="lk-group-label">Окна</div>
+                        <div class="lk-hint" style="line-height:1.8">
+                            Позиции и размеры окон запоминаются автоматически.<br>
+                            Двойной клик по иконке — запуск приложения.<br>
+                            Переключение стол ⇄ консоль — кнопка в трее.
                         </div>
                     </div>
                 </div>
@@ -352,6 +385,24 @@ const Settings = (() => {
                 cfg.themeColor = colorInput.value;
                 save(cfg);
                 apply(cfg);
+            });
+        }
+
+        // Режим рабочего стола — применяем к оболочке сразу
+        const desktopToggle = container.querySelector('.lk-toggle[data-key="desktopMode"]');
+        if (desktopToggle && typeof Desktop !== 'undefined' && Desktop.isSupported()) {
+            desktopToggle.addEventListener('click', () => {
+                desktopToggle.classList.contains('on') ? Desktop.show() : Desktop.showConsole();
+            });
+        }
+
+        // Сброс раскладки иконок рабочего стола
+        const resetIcons = container.querySelector('#lk-reset-icons');
+        if (resetIcons && typeof Desktop !== 'undefined') {
+            resetIcons.addEventListener('click', () => {
+                Desktop.resetIconLayout();
+                resetIcons.textContent = 'Готово ✓';
+                setTimeout(() => { resetIcons.textContent = 'Сброс'; }, 1500);
             });
         }
 

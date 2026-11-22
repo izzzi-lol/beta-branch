@@ -13,7 +13,8 @@
 
 #dossier-output {
     position: relative;
-    overflow: hidden;
+    /* overflow НЕ трогаем: terminal.css задаёт overflow-y: auto для скролла
+       вывода. Лок при открытом окне — в мобильной секции ниже. */
     isolation: isolate;
 }
 
@@ -352,6 +353,13 @@
        Он не участвует в потоке и не сдвигает вывод. */
     #dossier-output {
         position: relative;
+    }
+
+    /* Пока открыто хотя бы одно окно — скролл терминала заблокирован,
+       иначе слой окон уедет вместе с выводом. Специфичность :has(#id)
+       выше, чем у #dossier-output в terminal.css. */
+    #dossier-output:has(.lyoko-window) {
+        overflow: hidden;
     }
     
     #wm-backdrop {

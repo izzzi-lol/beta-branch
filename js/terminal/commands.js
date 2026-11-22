@@ -1,5 +1,5 @@
 // Глобальный список для автодополнения в main.js
-const COMMAND_LIST = ['get', 'help', 'clear', 'echo', 'reboot','test-dossier', 'upload','settings','browse','changelogs','plugin'];
+const COMMAND_LIST = ['get', 'help', 'clear', 'echo', 'reboot','test-dossier', 'upload','settings','browse','changelogs','plugin','desktop','apps','start'];
 
 const CommandHandler = {
     async execute(rawInput, terminal) {
@@ -35,6 +35,11 @@ const CommandHandler = {
                 terminal.printSystem(" ");
                 terminal.printSystem("  BROWSE [url]", 'var(--terminal-green)');
                 terminal.printSystem("    Встроенный браузер. Пример: browse https://scp-wiki.net");
+                terminal.printSystem(" ");
+                terminal.printSystem("  DESKTOP [on/off]", 'var(--terminal-green)');
+                terminal.printSystem("    Рабочий стол SCIPNET OS. Переключение стол ⇄ консоль.");
+                terminal.printSystem("  APPS", 'var(--terminal-green)');
+                terminal.printSystem("    Список приложений системы. Запуск — через ПУСК или иконки.");
                 terminal.printSystem(" ");
                 terminal.printSystem("  CLEAR", 'var(--terminal-green)');
                 terminal.printSystem("    Очистка экрана терминала.");
@@ -97,13 +102,44 @@ const CommandHandler = {
             case 'plugin':
                 await CmdPlugin.execute(args, terminal);
                 break;
+            case 'desktop':
+                if (typeof Desktop === 'undefined' || !Desktop.isSupported()) {
+                    terminal.printError("ОШИБКА: Оболочка недоступна на этом устройстве.");
+                    break;
+                }
+                terminal.printSystem("ПЕРЕКЛЮЧЕНИЕ РЕЖИМА ОБОЛОЧКИ…");
+                if (args[0]?.toLowerCase() === 'on')  Desktop.show();
+                else if (args[0]?.toLowerCase() === 'off') Desktop.showConsole();
+                else Desktop.toggleMode();
+                break;
+            case 'apps': {
+                if (typeof AppRegistry === 'undefined') break;
+                terminal.printSystem("╔═══════════════════════════════════════════╗");
+                terminal.printSystem("║     SCIPNET OS // СИСТЕМНЫЕ ПАКЕТЫ        ║");
+                terminal.printSystem("╚═══════════════════════════════════════════╝");
+                AppRegistry.list().forEach(a =>
+                    terminal.printSystem(`  ${(a.name || a.id).padEnd(14)} ${a.description || ''}`, 'var(--terminal-green)'));
+                terminal.printSystem(" ");
+                terminal.printSystem("Запуск: ПУСК на таскбаре, иконки стола или DESKTOP для смены режима.");
+                break;
+            }
+            case 'start':
+                if (typeof Taskbar !== 'undefined') Taskbar.toggleStartMenu();
+                break;
             case 'test-dossier':
-                await fetch('dossier_for_test.txt').then((res) => res.text())
-                    .then(text => {
-                        let sessionFiles = {};
-                        sessionFiles['izzy_profile.jpg'] = CmdUpload.fileToBase64('izzy_profile.jpg');
-                        renderer.render(text, output,'./', sessionFiles, true);
-                });
+                try {
+                    const res = await fetch('dossier_for_test.txt');
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const text = await res.text();
+
+                    const imgRes = await fetch('izzy_profile.jpg');
+                    if (!imgRes.ok) throw new Error(`HTTP ${imgRes.status}`);
+                    const sessionFiles = { 'izzy_profile.jpg': await CmdUpload.fileToBase64(await imgRes.blob()) };
+
+                    await renderer.render(text, terminal.getOutputNode(), './', sessionFiles, true);
+                } catch (e) {
+                    terminal.printError(`ОШИБКА ЗАГРУЗКИ ТЕСТОВОГО ДОСЬЕ: ${e.message}`);
+                }
                 break;
             case 'whoami':
                 await Cabinet.open(terminal);

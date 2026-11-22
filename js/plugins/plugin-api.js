@@ -203,9 +203,12 @@ const PluginAPI = (() => {
             execute,
         };
 
-        // Добавляем в COMMAND_LIST для автодополнения
-        if (Array.isArray(window.COMMAND_LIST) && !window.COMMAND_LIST.includes(cmd)) {
-            window.COMMAND_LIST.push(cmd);
+        // Добавляем в COMMAND_LIST для автодополнения.
+        // COMMAND_LIST объявлена const в commands.js — global lexical binding,
+        // на window её нет, поэтому typeof-guard вместо window.X.
+        const cmdList = (typeof COMMAND_LIST !== 'undefined') ? COMMAND_LIST : window.COMMAND_LIST;
+        if (Array.isArray(cmdList) && !cmdList.includes(cmd)) {
+            cmdList.push(cmd);
         }
 
         console.log(`[PluginAPI] "${name}" v${version} → команда: ${cmd}`);
@@ -231,10 +234,11 @@ const PluginAPI = (() => {
 
         delete _commands[cmd];
 
-        // Убираем из COMMAND_LIST
-        if (Array.isArray(window.COMMAND_LIST)) {
-            const idx = window.COMMAND_LIST.indexOf(cmd);
-            if (idx !== -1) window.COMMAND_LIST.splice(idx, 1);
+        // Убираем из COMMAND_LIST (см. комментарий в register() — typeof-guard)
+        const cmdList = (typeof COMMAND_LIST !== 'undefined') ? COMMAND_LIST : window.COMMAND_LIST;
+        if (Array.isArray(cmdList)) {
+            const idx = cmdList.indexOf(cmd);
+            if (idx !== -1) cmdList.splice(idx, 1);
         }
 
         return true;

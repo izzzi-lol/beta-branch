@@ -133,19 +133,27 @@ const CmdUpload = {
             const file = e.target.files[0];
             if (!file) return;
 
-            // Запускаем аудио НЕМЕДЛЕННО — до любого await,
-            // пока браузер ещё считает это доверенным жестом пользователя.
-            // После await file.text() контекст жеста теряется и play() блокируется.
-            const audio = new Audio(this.audioBlob);
-            audio.play().catch(() => {
-                terminal.printSystem('⚠ АУДИО НЕДОСТУПНО — ТОЛЬКО СУБТИТРЫ');
-            });
+                // Запускаем аудио НЕМЕДЛЕННО — до любого await,
+                // пока браузер ещё считает это доверенным жестом пользователя.
+                // После await file.text() контекст жеста теряется и play() блокируется.
+                // AudioHandler.play() вызывает audio.play() синхронно.
+                const audioId = AudioHandler.play(this.audioBlob, {
+                    onFail: () => terminal.printSystem('⚠ АУДИО НЕДОСТУПНО — ТОЛЬКО СУБТИТРЫ'),
+                });
 
-            // Теперь можно await — аудио уже в воздухе
-            this.dossierContent = await file.text();
-            this.dossierName    = file.name;
-            terminal.printSystem(`ТЕКСТОВЫЙ ФАЙЛ ЗАГРУЖЕН: ${file.name}`);
-            await this.startEchoPlayback(terminal, audio);
+                // Теперь можно await — аудио уже в воздухе
+                this.dossierContent = await file.text();
+                this.dossierName    = file.name;
+
+                // Скорость/питч/плёнка из метаданных текста — на лету,
+                // т.к. старт уже состоялся в жесте пользователя
+                const meta = parseEchoMeta(this.dossierContent);
+                AudioHandler.setTape(audioId, meta.tape);
+                AudioHandler.setSpeed(audioId, meta.speed);
+                AudioHandler.setPitch(audioId, meta.pitch);
+
+                terminal.printSystem(`ТЕКСТОВЫЙ ФАЙЛ ЗАГРУЖЕН: ${file.name}`);
+                await this.startEchoPlayback(terminal, audioId);
         };
 
         input.click();
@@ -155,38 +163,45 @@ const CmdUpload = {
     //  ECHO-PLAYBACK (локальные файлы)
     // -------------------------------------------------------------------------
 
-    // audio — опциональный уже запущенный объект (из _pickTextFile).
+    // audioId — опциональный уже запущенный звук в AudioHandler (из _pickTextFile).
     // Если не передан — создаём и запускаем здесь (прямой клик, жест не потерян).
-    async startEchoPlayback(terminal, audio = null) {
+    async startEchoPlayback(terminal, audioId = null) {
         // Убираем кнопки выбора если остались
         document.querySelectorAll('.operator-action-btn').forEach(b => b.remove());
 
         terminal.printSystem(`— ВОСПРОИЗВЕДЕНИЕ: ${this.audioName} —`);
 
-        if (!audio) {
+        // Метаданные скорости/питча/плёнки из загруженного текста
+        const meta = this.dossierContent
+            ? parseEchoMeta(this.dossierContent)
+            : { speed: 1.0, pitch: 1.0, tape: false };
+
+        if (!audioId) {
             // Вызов из кнопки «ВОСПРОИЗВЕСТИ БЕЗ ТЕКСТА» — жест ещё живой
-            audio = new Audio(this.audioBlob);
-            try {
-                await audio.play();
-            } catch (_) {
-                terminal.printSystem('⚠ АУДИО НЕДОСТУПНО — ТОЛЬКО СУБТИТРЫ');
-            }
+            audioId = AudioHandler.play(this.audioBlob, {
+                speed:  meta.speed,
+                pitch:  meta.pitch,
+                tape:   meta.tape,
+                onFail: () => terminal.printSystem('⚠ АУДИО НЕДОСТУПНО — ТОЛЬКО СУБТИТРЫ'),
+            });
         }
 
         const outputContainer = TerminalAPI.getOutputNode();
         const renderer        = new StepRenderer();
+        renderer.timeScale    = meta.speed;   // субтитры едут со скоростью аудио
+        renderer.audioClock   = () => AudioHandler.getElapsed(audioId);  // [AT]/[SYNC]
 
         // Баннер прерывания
         const banner = this._makeBanner(
             'НАЖМИТЕ ПРОБЕЛ ИЛИ КЛИКНИТЕ ЗДЕСЬ, ЧТОБЫ ОСТАНОВИТЬ АУДИО',
-            () => { audio.pause(); renderer.skip(); }
+            () => { AudioHandler.stop(audioId); renderer.skip(); }
         );
 
         const onKeyDown = (e) => {
             if (e.code === 'Space' || e.key === ' ') {
                 if (document.activeElement?.id === 'cmd-input') return;
                 e.preventDefault();
-                audio.pause();
+                AudioHandler.stop(audioId);
                 renderer.skip();
             }
         };
@@ -200,17 +215,19 @@ const CmdUpload = {
                 // Только аудио → ждём окончания трека
                 terminal.printSystem('[АУДИО БЕЗ СУБТИТРОВ]');
                 await new Promise((resolve) => {
-                    audio.addEventListener('ended', resolve, { once: true });
-                    // skip() тоже резолвит
-                    const checkSkip = setInterval(() => {
-                        if (renderer._skip) { clearInterval(checkSkip); resolve(); }
+                    // getElapsed → null = звук закончился/остановлен/не заиграл
+                    const checkDone = setInterval(() => {
+                        if (renderer._skip || AudioHandler.getElapsed(audioId) == null) {
+                            clearInterval(checkDone);
+                            resolve();
+                        }
                     }, 100);
                 });
             }
         } finally {
             banner.remove();
             document.removeEventListener('keydown', onKeyDown);
-            if (!audio.paused) { audio.pause(); audio.currentTime = 0; }
+            AudioHandler.stop(audioId);   // no-op, если уже закончилось/остановлено
         }
     },
 

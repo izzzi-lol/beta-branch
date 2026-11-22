@@ -7,7 +7,8 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=IBM+Plex+Sans:wght@400;600;700&family=Inter:wght@400;700&family=VT323&display=swap">
     <link rel="stylesheet" type='text/css' media='screen' href="css/terminal.css">
     <link rel="stylesheet" type='text/css' media='screen' href="css/windows.css">
-    <link rel="stylesheet" type='text/css' media='screen' href="css/settings.css">
+	<link rel="stylesheet" type='text/css' media='screen' href="css/settings.css">
+	<link rel="stylesheet" type='text/css' media='screen' href="css/desktop.css">
 	<link rel="icon" type="image/x-icon" href="assets/images/favicon.svg">
 	<!-- SEO -->
 	<meta name="description" content="SCIPNET O5-Terminal — Современный интерактивный терминал SCP Foundation. Получите доступ к досье персонала, записи инцедентов, SCP-объектов и ECHO записей.">
@@ -17,8 +18,8 @@
 	<!--Open Graph (превью в Discord, Telegram, VK) -->
 	<meta property="og:title" content="SCIPNET // O5-TERMINAL">
 	<meta property="og:description" content="Интерактивный терминал SCP Foundation. Доступ к досье персонала, ECHO-записям и базам данных Фонда.">
-	<meta property="og:image" content="https://izzzi-lol.github.io/assets/images/scp-animated.svg">
-	<meta property="og:url" content="https://izzzi-lol.github.io">
+	<meta property="og:image" content="https://izzzi-lol.github.io/beta-branch/assets/images/scp-animated.svg">
+	<meta property="og:url" content="https://izzzi-lol.github.io/beta-branch/">
 	<meta property="og:type" content="website">
 
 	<!-- Twitter/X -->
@@ -160,6 +161,10 @@
 
 </div>
 
+<!-- SCIPNET OS: рабочий стол и таскбар (наполняются из JS, мобилка их скрывает) -->
+<div id="desktop-layer"><div id="desktop-icons"></div></div>
+<div id="taskbar" hidden></div>
+
 <!-- JS: PLUGINS — API и менеджер плагинов -->
     <script src="js/plugins/plugin-api.js"></script>
     <script src="js/plugins/plugin-manager.js"></script>
@@ -168,10 +173,13 @@
     <script src="js/core/audio-handler.js"></script>
     <script src="js/core/glitch.js"></script>
     <script src="js/core/window-manager.js"></script>
+    <script src="js/core/app-registry.js"></script>
 
     <!-- JS: UI — интерфейс и дополнительные окна -->
     <script src="js/ui/settings.js"></script>
     <script src="js/ui/cabinet.js"></script>
+    <script src="js/ui/desktop.js"></script>
+    <script src="js/ui/taskbar.js"></script>
 
     <!-- JS: TERMINAL — команды и рендеринг терминала -->
     <script src="js/terminal/commands.js"></script>
@@ -181,8 +189,14 @@
     <script src="js/terminal/cmd_browse.js"></script>
     <script src="js/terminal/cmd_upload.js"></script>
     <script src="js/terminal/cmd_plugin.js"></script>
+
+    <!-- JS: OS-ПРИЛОЖЕНИЯ — грузятся ПОСЛЕ терминала (DEX проверяет CmdGet
+         при загрузке; регистрация команд требует COMMAND_LIST из commands.js) -->
+    <script src="js/ui/app-echo.js"></script>
+    <script src="js/ui/dos-explorer.js"></script>
+    <script src="js/ui/text-editor.js"></script>
 <!-- JS: MAIN — точка входа приложение -->
-    <script src="js/main.js"></scrip>
+    <script src="js/main.js"></script>
 <!-- INLINE JS — часы и память в статус-бар -->
     <script>
         (function() {
