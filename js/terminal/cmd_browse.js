@@ -192,7 +192,7 @@ function _brBuildHTML(url) {
 
 // ── Открыть окно ──────────────────────────────────────────────────────────────
 function _brOpenWindow(url) {
-    const IS_MOBILE = window.matchMedia('(hover:none),(pointer:coarse)').matches;
+    const IS_MOBILE = Platform.isMobile; // единое определение из js/core/platform.js
     const _vw = window.innerWidth;
     const _vh = window.innerHeight;
 

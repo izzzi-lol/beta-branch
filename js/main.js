@@ -255,10 +255,12 @@ window.onload = async () => {
     await PluginManager.init();
 
     // ── SCIPNET OS: оболочка рабочего стола ──────────────────────────────────
-    // Только desktop-браузеры (на мобилке оба init() — no-op).
+    // Desktop/Taskbar — только desktop-браузеры (на мобилке init() — no-op).
+    // PhoneOS — наоборот, мобильная оболочка (на десктопе no-op).
     AppRegistry.registerBuiltins();
     Desktop.init();
     Taskbar.init();
+    PhoneOS.init();
 
     AudioHandler.playUI('ambient');
     await renderer.render("[SIZE=24][SCP FOUNDATION'S DOSSIER HUB][/SIZE][TIMER=1]",

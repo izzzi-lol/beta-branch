@@ -14,7 +14,7 @@
 
 const Desktop = (() => {
 
-    const IS_MOBILE = window.matchMedia('(hover: none), (pointer: coarse)').matches;
+    const IS_MOBILE = Platform.isMobile; // единое определение из js/core/platform.js
     const TASKBAR_H = 36;              // синхронизировано с высотой в desktop.css
     const ICONS_KEY = 'scipnet_desktop_icons';
 

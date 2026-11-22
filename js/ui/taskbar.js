@@ -11,7 +11,7 @@
 
 const Taskbar = (() => {
 
-    const IS_MOBILE = window.matchMedia('(hover: none), (pointer: coarse)').matches;
+    const IS_MOBILE = Platform.isMobile; // единое определение из js/core/platform.js
 
     let bar, startBtn, menu, winBtns, modeBtn, clockEl, memEl;
     let _menuOpen = false;

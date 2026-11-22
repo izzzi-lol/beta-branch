@@ -131,7 +131,14 @@ const AppRegistry = (() => {
         register({
             id: 'console', name: 'Консоль', icon: ICONS.console,
             description: 'Терминал SCIPNET',
-            launch: () => Desktop.toggleMode(),
+            launch: () => {
+                // Мобилка: PhoneOS скрывает свой слой и показывает терминал
+                if (typeof PhoneOS !== 'undefined' && PhoneOS.isSupported()) {
+                    PhoneOS.showConsole();
+                    return;
+                }
+                Desktop.toggleMode();
+            },
         });
         // Файлы приложений (dos-explorer.js, app-echo.js) саморегистрируются
         // при загрузке — здесь только fallback, если файл не подключён

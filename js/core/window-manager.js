@@ -43,8 +43,8 @@
 
 const WindowManager = (() => {
 
-    // ── Определение платформы ────────────────────────────────────────────────
-    const IS_MOBILE = window.matchMedia('(hover: none), (pointer: coarse)').matches;
+    // ── Определение платформы (единый Platform из js/core/platform.js) ───────
+    const IS_MOBILE = Platform.isMobile;
 
     // ── DOM ──────────────────────────────────────────────────────────────────
     let layer, backdrop;
@@ -222,10 +222,17 @@ const WindowManager = (() => {
         titlebar.addEventListener('touchend', e => {
             const dx = e.changedTouches[0].clientX - sx;
             const dy = e.changedTouches[0].clientY - sy;
+            const dt = Date.now() - t0 || 1;
+
+            // Свайп вверх → на главный экран PhoneOS (быстрый и заметный)
+            if (Math.abs(dy) > Math.abs(dx) && dy < -40 && (Math.abs(dy) / dt) >= 0.3) {
+                if (typeof PhoneOS !== 'undefined') PhoneOS.showHome();
+                return;
+            }
 
             // Игнорируем вертикальный свайп и слишком медленные/короткие
             if (Math.abs(dy) > Math.abs(dx)) return;
-            const velocity = Math.abs(dx) / (Date.now() - t0 || 1);
+            const velocity = Math.abs(dx) / dt;
             if (velocity < 0.3 || Math.abs(dx) < 40) return;
 
             const ids = Object.keys(_windows);
@@ -631,6 +638,7 @@ const WindowManager = (() => {
             win.innerHTML = `
                 <div class="lyoko-titlebar">
                     <div class="lyoko-tab-strip"></div>
+                    <button class="lyoko-btn home" title="Домой">⌂</button>
                     <button class="lyoko-btn close" title="Закрыть">✕</button>
                 </div>
                 <div class="lyoko-content-wrapper">
@@ -638,7 +646,10 @@ const WindowManager = (() => {
                 </div>
                 ${opts.status ? `<div class="lyoko-statusbar"><span>${opts.status}</span><span>ID:${id.toUpperCase()}</span></div>` : ''}
             `;
-            
+
+            win.querySelector('.lyoko-btn.home').addEventListener('click', () => {
+                if (typeof PhoneOS !== 'undefined') PhoneOS.showHome();
+            });
             _addMobileSwipe(win, win.querySelector('.lyoko-titlebar'));
 
         } else {
@@ -773,6 +784,8 @@ const WindowManager = (() => {
                 _switchToWindow(remaining[remaining.length - 1]);
             } else {
                 _mobileActiveId = null;
+                // Закрылось последнее окно → возврат на главный экран PhoneOS
+                if (typeof PhoneOS !== 'undefined') PhoneOS.showHome();
             }
         }
 

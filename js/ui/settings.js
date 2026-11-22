@@ -20,6 +20,7 @@ const Settings = (() => {
         uiVolume:     50,   // громкость UI-звуков (0–100)
         echoVolume:   75,   // громкость ECHO-записей (0–100)
         desktopMode:  true, // оболочка SCIPNET OS при загрузке (только desktop-браузеры)
+        phoneMode:    true, // оболочка PhoneOS при загрузке (только мобильные)
     };
 
     // ── Загрузка / сохранение ─────────────────────────────────────────────────
@@ -223,6 +224,14 @@ const Settings = (() => {
                             </div>
                             <div class="lk-toggle ${cfg.desktopMode ? 'on' : ''}" data-key="desktopMode"></div>
                         </div>
+                        ${Platform.isMobile ? `
+                        <div class="lk-row">
+                            <div>
+                                <div class="lk-label">PhoneOS</div>
+                                <div class="lk-hint">Оболочка телефона: локскрин и home-экран вместо консоли</div>
+                            </div>
+                            <div class="lk-toggle ${cfg.phoneMode ? 'on' : ''}" data-key="phoneMode"></div>
+                        </div>` : ''}
                         <div class="lk-row">
                             <div>
                                 <div class="lk-label">Раскладка иконок</div>
@@ -393,6 +402,18 @@ const Settings = (() => {
         if (desktopToggle && typeof Desktop !== 'undefined' && Desktop.isSupported()) {
             desktopToggle.addEventListener('click', () => {
                 desktopToggle.classList.contains('on') ? Desktop.show() : Desktop.showConsole();
+            });
+        }
+
+        // PhoneOS — включение/выключение оболочки на лету (только мобильные)
+        const phoneToggle = container.querySelector('.lk-toggle[data-key="phoneMode"]');
+        if (phoneToggle && typeof PhoneOS !== 'undefined' && PhoneOS.isSupported()) {
+            phoneToggle.addEventListener('click', () => {
+                if (phoneToggle.classList.contains('on')) {
+                    if (!PhoneOS.isActive()) PhoneOS.enable();
+                } else if (PhoneOS.isActive()) {
+                    PhoneOS.disable();
+                }
             });
         }
 

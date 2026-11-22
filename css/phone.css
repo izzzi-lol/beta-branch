@@ -1,0 +1,272 @@
+/* =============================================================================
+   phone.css — PhoneOS, мобильная оболочка SCIPNET (js/ui/phone.js)
+
+   #phone-layer z-index 700: над окнами (500+) и таскбаром (600, которого на
+   мобилке нет), под CRT-fx (9998) и интро/auth (9999). Слой создаётся только
+   на мобильных устройствах (PhoneOS._buildDOM), поэтому стили безвредны для
+   десктопа. Палитра и акцент — как у desktop-шелла (фосфор + --theme-color).
+   ============================================================================= */
+
+#phone-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 700;
+    display: none;
+    /* Обои: тёмный фон + слабое свечение, как у рабочего стола */
+    background:
+        radial-gradient(ellipse 120% 60% at 50% -10%, rgba(0, 255, 65, 0.06), transparent 60%),
+        radial-gradient(ellipse 90% 50% at 50% 110%, rgba(0, 255, 65, 0.04), transparent 60%),
+        #030705;
+    color: var(--terminal-green, #00ff41);
+    font-family: var(--mono-font, monospace);
+    -webkit-tap-highlight-color: transparent;
+}
+#phone-layer.visible { display: block; }
+
+/* ── Локскрин ─────────────────────────────────────────────────────────────── */
+
+#phone-lock {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: transform 0.35s ease, opacity 0.35s ease;
+}
+#phone-lock.unlocked {
+    transform: translateY(-100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.phone-lock-time {
+    font-size: 3.2em;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: #eaffef;
+    text-shadow: 0 0 18px rgba(0, 255, 65, 0.35);
+}
+.phone-lock-date {
+    font-size: 0.85em;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #7fbf8f;
+}
+.phone-lock-sigil {
+    margin-top: 26px;
+    width: 72px;
+    height: 72px;
+    color: var(--theme-color, #a200ff);
+    filter: drop-shadow(0 0 12px rgba(162, 0, 255, 0.45));
+    animation: phone-sigil-pulse 3s ease-in-out infinite;
+}
+.phone-lock-sigil svg { width: 100%; height: 100%; }
+@keyframes phone-sigil-pulse {
+    0%, 100% { opacity: 0.85; }
+    50%      { opacity: 1; }
+}
+.phone-lock-title {
+    margin-top: 8px;
+    font-size: 1.05em;
+    letter-spacing: 6px;
+    color: var(--terminal-green, #00ff41);
+}
+.phone-lock-sub {
+    font-size: 0.62em;
+    letter-spacing: 3px;
+    color: rgba(0, 255, 65, 0.45);
+}
+.phone-lock-hint {
+    position: absolute;
+    bottom: calc(34px + env(safe-area-inset-bottom, 0px));
+    font-size: 0.66em;
+    letter-spacing: 2px;
+    color: #9fd8ab;
+    animation: phone-hint-bob 2.2s ease-in-out infinite;
+}
+@keyframes phone-hint-bob {
+    0%, 100% { transform: translateY(0);    opacity: 0.75; }
+    50%      { transform: translateY(-6px); opacity: 1; }
+}
+
+/* ── Home-экран ───────────────────────────────────────────────────────────── */
+
+#phone-home {
+    position: absolute;
+    inset: 0;
+    display: none;          /* управляется из phone.js (_syncView) */
+    flex-direction: column;
+}
+
+.phone-statusbar {
+    height: 28px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+    padding-top: env(safe-area-inset-top, 0px);
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: #9fd8ab;
+    background: rgba(0, 20, 8, 0.6);
+    border-bottom: 1px solid rgba(0, 255, 65, 0.15);
+}
+.phone-sb-time { color: #eaffef; font-weight: 700; }
+.phone-sb-label { flex: 1; text-align: center; color: rgba(0, 255, 65, 0.5); }
+.phone-sb-right { display: flex; align-items: center; gap: 6px; }
+.phone-signal { width: 18px; height: 11px; fill: var(--terminal-green, #00ff41); opacity: 0.85; }
+.phone-batt-pct { font-size: 10px; }
+.phone-batt {
+    width: 22px;
+    height: 11px;
+    padding: 1px;
+    border: 1px solid rgba(0, 255, 65, 0.5);
+    border-radius: 2px;
+    position: relative;
+}
+.phone-batt::after {           /* контакт батарейки */
+    content: '';
+    position: absolute;
+    right: -3px;
+    top: 2px;
+    width: 2px;
+    height: 5px;
+    background: rgba(0, 255, 65, 0.5);
+}
+.phone-batt-fill {
+    display: block;
+    height: 100%;
+    width: 87%;
+    background: var(--terminal-green, #00ff41);
+    box-shadow: 0 0 6px rgba(0, 255, 65, 0.5);
+}
+.phone-batt-fill.low { background: #ff5060; box-shadow: 0 0 6px rgba(255, 50, 60, 0.5); }
+
+.phone-grid {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px 4px;
+    align-content: start;
+    padding: 22px 8px;
+}
+
+.phone-app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 0;
+    background: none;
+    border: none;
+    font-family: inherit;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.phone-app-icon {
+    width: 54px;
+    height: 54px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--terminal-green, #00ff41);
+    background: rgba(0, 20, 8, 0.82);
+    border: 1px solid rgba(0, 255, 65, 0.30);
+    border-radius: 12px;
+    box-shadow: 0 0 10px rgba(0, 255, 65, 0.10), inset 0 0 12px rgba(0, 255, 65, 0.05);
+    transition: box-shadow 0.12s, border-color 0.12s, transform 0.08s;
+}
+.phone-app-icon svg { width: 28px; height: 28px; }
+.phone-app:active .phone-app-icon {
+    transform: scale(0.92);
+    border-color: var(--theme-color, #a200ff);
+    box-shadow: 0 0 16px rgba(162, 0, 255, 0.35), inset 0 0 12px rgba(162, 0, 255, 0.12);
+    color: #eaffef;
+}
+.phone-app-label {
+    max-width: 74px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    color: #b8e6c0;
+}
+
+/* ── Док ──────────────────────────────────────────────────────────────────── */
+
+.phone-dock {
+    flex-shrink: 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    padding: 10px 6px;
+    margin: 0 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: rgba(0, 20, 8, 0.72);
+    border: 1px solid rgba(0, 255, 65, 0.22);
+    border-radius: 14px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+}
+
+.phone-homebar {
+    position: absolute;
+    bottom: calc(3px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    width: 110px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.18);
+    pointer-events: none;
+}
+
+/* ── Плавающая «⌂»: возврат домой из консоли (когда окон нет) ─────────────── */
+
+#phone-home-pill {
+    position: fixed;
+    right: 12px;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    z-index: 701;
+    width: 46px;
+    height: 46px;
+    display: none;              /* управляется из phone.js (_syncView) */
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    color: var(--terminal-green, #00ff41);
+    background: rgba(0, 20, 8, 0.85);
+    border: 1px solid rgba(0, 255, 65, 0.35);
+    border-radius: 50%;
+    box-shadow: 0 0 12px rgba(0, 255, 65, 0.2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+#phone-home-pill:active {
+    border-color: var(--theme-color, #a200ff);
+    color: #eaffef;
+    box-shadow: 0 0 16px rgba(162, 0, 255, 0.4);
+}
+
+/* ── Кнопка «домой» в тайтлбаре мобильного окна ───────────────────────────── */
+
+@media (hover: none), (pointer: coarse) {
+    .lyoko-btn.home {
+        width: 34px;
+        height: 34px;
+        font-size: 14px;
+        align-self: center;
+        flex-shrink: 0;
+        margin: 3px 0;
+    }
+    .lyoko-btn.home:hover {
+        background: rgba(0, 255, 65, 0.14);
+        border-color: rgba(0, 255, 65, 0.55);
+        color: #eaffef;
+    }
+}
