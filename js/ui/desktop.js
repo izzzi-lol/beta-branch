@@ -191,7 +191,7 @@ const Desktop = (() => {
 
         setTimeout(() => {
             try { localStorage.setItem('has_seen_intro', 'false'); } catch (_) {}
-            location.reload();
+            window.close();
         }, 2500);
     }
 
