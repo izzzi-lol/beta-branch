@@ -25,6 +25,7 @@ const AppRegistry = (() => {
         console:  _svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M12 15h5"/>'),
         dossiers: _svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
         echo:     _svg('<path d="M3 12h2"/><path d="M7 8v8"/><path d="M11 5v14"/><path d="M15 8v8"/><path d="M19 10v4"/>'),
+        audio:    _svg('<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z" fill="currentColor" stroke="none"/>'),
         browser:  _svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14.5 14.5 0 0 1 0 18a14.5 14.5 0 0 1 0-18"/>'),
         plugins:  _svg('<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 7V4M14 7V4M10 20v-3M14 20v-3M7 10H4M7 14H4M20 10h-3M20 14h-3"/>'),
         settings: _svg('<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M21.2 12h-3M5.8 12h-3M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1M18.5 18.5l-2.1-2.1M7.6 7.6L5.5 5.5"/>'),
@@ -67,6 +68,10 @@ const AppRegistry = (() => {
     //  ВСТРОЕННЫЕ ПРИЛОЖЕНИЯ
     // =========================================================================
 
+    // Экранирование сторонних строк (имена плагинов — данные с удалённых URL)
+    const _esc = s => String(s ?? '').replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
     /** Окно «Программы»: список установленных плагинов + установка по URL. */
     function _openPluginsApp() {
         const html = `
@@ -90,29 +95,38 @@ const AppRegistry = (() => {
 
         const content = document.querySelector('.lyoko-window[data-id="plugins"] .lyoko-content');
         if (!content) return;
-        content.querySelector('#os-plugin-install-btn').addEventListener('click', () => {
+        content.querySelector('#os-plugin-install-btn').addEventListener('click', async () => {
             const url = content.querySelector('#os-plugin-url').value.trim();
             if (!url) return;
-            PluginManager.install(url, TerminalAPI);
-            // Пере-рендер после завершения установки (confirm + fetch занимают время)
-            setTimeout(_renderPluginList, 5000);
+            try {
+                await PluginManager.install(url, TerminalAPI);
+            } catch (_) { /* install сам печатает ошибки в терминал */ }
+            // FIX: раньше был фиктивный setTimeout(5000) — теперь ре-рендер ровно
+            // по завершении установки (install — async).
+            _renderPluginList();
         });
     }
 
-    function _renderPluginList() {
+    async function _renderPluginList() {
         const listEl = document.querySelector('.lyoko-window[data-id="plugins"] #os-plugin-list');
         if (!listEl || typeof PluginManager === 'undefined') return;
 
-        const items = PluginManager.getAll() || [];
+        // FIX: getAll() — async. Раньше результат (Promise) использовался как
+        // массив: items.length === undefined → окно всегда показывало
+        // «Установленных программ нет», а кнопки запуска/удаления не вешались.
+        let items = [];
+        try { items = (await PluginManager.getAll()) || []; }
+        catch (_) { items = []; }
+
         listEl.innerHTML = items.length
             ? items.map(p => `
                 <div class="os-plugin-item">
                     <div class="os-plugin-info">
-                        <span class="os-plugin-name">${p.name}</span>
-                        <span class="os-plugin-meta">/${p.command} · v${p.version || '?'} · ${p.autostart ? 'автозапуск' : 'ручной запуск'}</span>
+                        <span class="os-plugin-name">${_esc(p.name)}</span>
+                        <span class="os-plugin-meta">/${_esc(p.command)} · v${_esc(p.version || '?')} · ${p.autostart ? 'автозапуск' : 'ручной запуск'}</span>
                     </div>
-                    <button class="os-btn small os-plugin-run"    data-cmd="${p.command}" title="Запустить">▶</button>
-                    <button class="os-btn small danger os-plugin-remove" data-id="${p.id}"  title="Удалить">✕</button>
+                    <button class="os-btn small os-plugin-run"    data-cmd="${_esc(p.command)}" title="Запустить">▶</button>
+                    <button class="os-btn small danger os-plugin-remove" data-id="${_esc(p.id)}"  title="Удалить">✕</button>
                 </div>`).join('')
             : '<div class="os-empty">Установленных программ нет.</div>';
 
@@ -120,9 +134,10 @@ const AppRegistry = (() => {
             btn.addEventListener('click', () => TerminalAPI.typeAndExecute(btn.dataset.cmd));
         });
         listEl.querySelectorAll('.os-plugin-remove').forEach(btn => {
-            btn.addEventListener('click', () => {
-                PluginManager.remove(btn.dataset.id, TerminalAPI);
-                setTimeout(_renderPluginList, 1500);
+            btn.addEventListener('click', async () => {
+                try { await PluginManager.remove(btn.dataset.id, TerminalAPI); }
+                catch (_) { /* remove сам печатает ошибки */ }
+                _renderPluginList();
             });
         });
     }

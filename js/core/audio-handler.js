@@ -184,24 +184,40 @@ const AudioHandler = (() => {
      * @param {object} entry
      */
     async function _attachGraph(id, entry) {
-        const ok = await _ensureWorklet();
-        if (!ok || _active.get(id) !== entry) return;   // остановлен, пока грузился воркет
+        // FIX: защита от параллельного вызова. Два быстрых setPitch() подряд
+        // запускали два _attachGraph: второй createMediaElementSource бросал
+        // InvalidStateError, и питч молча сбрасывался в 1 (см. catch ниже).
+        if (entry._attachInFlight) return;
+        entry._attachInFlight = true;
         try {
-            const ctx = _getCtx();
-            if (ctx.state === 'suspended') ctx.resume();
+            const ok = await _ensureWorklet();
+            if (!ok || _active.get(id) !== entry) return;   // остановлен, пока грузился воркет
+            try {
+                const ctx = _getCtx();
+                // FIX: resume теперь awaited — раньше не-awaited resume при
+                // контексте, созданном без жеста пользователя, давал
+                // MediaElementSource в suspended-графе: звук исчезал совсем.
+                if (ctx.state === 'suspended') {
+                    try { await ctx.resume(); } catch (_) { /* попробуем без него */ }
+                }
 
-            const source  = ctx.createMediaElementSource(entry.audio);
-            const worklet = new AudioWorkletNode(ctx, 'pitch-shifter', {
-                numberOfInputs:  1,
-                numberOfOutputs: 1,
-                processorOptions: { pitch: entry.pitch },
-            });
-            source.connect(worklet);
-            worklet.connect(ctx.destination);
-            entry.graph = { source, worklet };
-        } catch (e) {
-            console.warn('[AudioHandler] pitch-граф не подключился — питч пропущен:', e?.message);
-            entry.pitch = 1;
+                const source  = ctx.createMediaElementSource(entry.audio);
+                const worklet = new AudioWorkletNode(ctx, 'pitch-shifter', {
+                    numberOfInputs:  1,
+                    numberOfOutputs: 1,
+                    // FIX: читаем entry.pitch в момент подключения (а не в момент
+                    // первого вызова) — параллельный setPitch уже обновил значение
+                    processorOptions: { pitch: entry.pitch },
+                });
+                source.connect(worklet);
+                worklet.connect(ctx.destination);
+                entry.graph = { source, worklet };
+            } catch (e) {
+                console.warn('[AudioHandler] pitch-граф не подключился — питч пропущен:', e?.message);
+                entry.pitch = 1;
+            }
+        } finally {
+            entry._attachInFlight = false;
         }
     }
 
@@ -384,6 +400,8 @@ const AudioHandler = (() => {
                 entry.graph.bypassed = false;
             } catch (_) {}
         } else if (v !== 1.0) {
+            // FIX: _attachGraph сам игнорирует повторный вызов, пока предыдущий
+            // в полёте (entry._attachInFlight) — раньше гонка молча теряла питч.
             _attachGraph(id, entry);   // ленивое подключение при первом живом питче
         }
     }

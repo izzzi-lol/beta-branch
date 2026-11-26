@@ -71,7 +71,9 @@ async function showChangelogs(){
         .replace(/!COM /g, '');
 
     if (lastUpdatedChangelogs !== cahcedLUC) {
-        await CommandHandler.execute('changelogs', TerminalAPI);
+        try {
+            await CommandHandler.execute('changelogs', TerminalAPI);
+        } catch (_) { /* showChangelogs вызывается без await в main.js — не роняем сессию */ }
         localStorage.setItem('cachedLUC', lastUpdatedChangelogs);
     }
 }
@@ -298,9 +300,17 @@ input.addEventListener('keydown', async (e) => {
         suggestion.textContent = '';
         TerminalAPI.lockInput();
 
-        await CommandHandler.execute(rawInput, TerminalAPI);
-
-        TerminalAPI.unlockInput();
+        // FIX: try/finally — раньше любая непойманная ошибка команды
+        // (например, неудачный fetch changelogs.txt) оставляла терминал
+        // заблокированным навсегда: unlockInput() не вызывался.
+        try {
+            await CommandHandler.execute(rawInput, TerminalAPI);
+        } catch (e) {
+            console.error('[SCIPNET] Ошибка команды:', e);
+            TerminalAPI.printError(`СИСТЕМНЫЙ СБОЙ: ${e?.message || e}`);
+        } finally {
+            TerminalAPI.unlockInput();
+        }
     }
 });
 
@@ -364,8 +374,15 @@ const TerminalAPI = {
         input.value = '';
         suggestion.textContent = '';
 
-        await CommandHandler.execute(command, TerminalAPI);
-        this.unlockInput();
+        // FIX: try/finally — та же защита от вечного лока, что и в обработчике Enter
+        try {
+            await CommandHandler.execute(command, TerminalAPI);
+        } catch (e) {
+            console.error('[SCIPNET] Ошибка команды:', e);
+            this.printError(`СИСТЕМНЫЙ СБОЙ: ${e?.message || e}`);
+        } finally {
+            this.unlockInput();
+        }
     },
 
     parseCmdTags(container) {

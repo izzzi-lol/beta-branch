@@ -831,7 +831,13 @@ class StepRenderer {
                         ? localImageMap[imageName]
                         : `${basePath}images/${imageName}`;
 
-                    el.innerHTML = `<img src="${imageSrc}" alt="${caption}"><div class="scp-image-caption">${caption}</div>`;
+                    // FIX: imageSrc/caption приходят из текста досье (удалённого
+                    // или пользовательского) — раньше вставлялись в innerHTML
+                    // без экранирования: caption с кавычкой ломал атрибут alt
+                    // и позволял внедрить HTML/JS (XSS). Аналогично toHTML().
+                    const Eimg = StepRenderer._escapeHtml;
+                    el.innerHTML = `<img src="${Eimg(imageSrc)}" alt="${Eimg(caption)}">` +
+                                   `<div class="scp-image-caption">${Eimg(caption)}</div>`;
 
                 } else if (line.startsWith('[TABLE6]')) {
                     const wrapper = document.createElement('div');
@@ -1142,7 +1148,8 @@ class StepRenderer {
                 out.push(
                     `<div class="scp-image-container ${mode}-mode visible"` +
                     (isNaN(scale) ? '' : ` style="--img-scale:${scale}"`) + `>` +
-                    `<img src="${src}" alt="${cap}">` +
+                    // FIX: src экранируется — имя файла из досье могло содержать "
+                    `<img src="${E(src)}" alt="${cap}">` +
                     `<div class="scp-image-caption">${cap}</div></div>\n`
                 );
                 continue;

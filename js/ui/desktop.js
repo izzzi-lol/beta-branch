@@ -116,9 +116,14 @@ const Desktop = (() => {
                 iconEl.classList.remove('dragging');
                 if (!moved) return; // это был клик
 
-                // Магнит к сетке + сохранение раскладки
-                const nx = Math.max(PAD_X, Math.round((iconEl.offsetLeft - PAD_X) / CELL_W) * CELL_W + PAD_X);
-                const ny = Math.max(PAD_Y, Math.round((iconEl.offsetTop  - PAD_Y) / CELL_H) * CELL_H + PAD_Y);
+                // Магнит к сетке + сохранение раскладки.
+                // FIX: раньше был только Math.max — иконку можно было утащить
+                // за правый/нижний край экрана и сохранить там (недостижима
+                // без «Сброса раскладки»). Добавлен верхний клэмп по вьюпорту.
+                const maxX = Math.max(PAD_X, window.innerWidth  - PAD_X  - (iconEl.offsetWidth  || 48));
+                const maxY = Math.max(PAD_Y, window.innerHeight - PAD_Y - (iconEl.offsetHeight || 48));
+                const nx = Math.min(maxX, Math.max(PAD_X, Math.round((iconEl.offsetLeft - PAD_X) / CELL_W) * CELL_W + PAD_X));
+                const ny = Math.min(maxY, Math.max(PAD_Y, Math.round((iconEl.offsetTop  - PAD_Y) / CELL_H) * CELL_H + PAD_Y));
                 iconEl.style.left = nx + 'px';
                 iconEl.style.top  = ny + 'px';
 
@@ -192,6 +197,23 @@ const Desktop = (() => {
         setTimeout(() => {
             try { localStorage.setItem('has_seen_intro', 'false'); } catch (_) {}
             window.close();
+
+            // FIX: window.close() работает только для вкладок, открытых
+            // скриптом — в обычном случае он молча не срабатывает, и
+            // пользователь оставался навсегда на чёрном экране без
+            // подсказок. Если вкладка не закрылась — показываем сообщение
+            // и перезагружаем систему по клику (или через 4 секунды).
+            setTimeout(() => {
+                if (window.closed) return;
+                const msg = ov.querySelector('.os-shutdown-msg');
+                if (msg) {
+                    msg.textContent = 'СЕССИЯ ЗАВЕРШЕНА — НАЖМИТЕ, ЧТОБЫ ПЕРЕЗАГРУЗИТЬСЯ';
+                    msg.style.cursor = 'pointer';
+                }
+                ov.style.cursor = 'pointer';
+                ov.addEventListener('click', () => location.reload(), { once: true });
+            }, 400);
+            setTimeout(() => { if (!window.closed) location.reload(); }, 4400);
         }, 2500);
     }
 

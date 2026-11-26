@@ -432,6 +432,9 @@ const Settings = (() => {
         if (clearCache) {
             clearCache.addEventListener('click', () => {
                 sessionStorage.removeItem('dossier_folders_cache');
+                // FIX: у архива ECHO свой кэш (app-echo.js) — раньше «Очистить»
+                // оставлял его нетронутым, и половина кэшей оставалась устаревшей
+                sessionStorage.removeItem('echo_folders_cache');
                 clearCache.textContent = 'Готово ✓';
                 setTimeout(() => { clearCache.textContent = 'Очистить'; }, 1500);
             });

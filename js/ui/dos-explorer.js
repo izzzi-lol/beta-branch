@@ -43,7 +43,7 @@
     const PROF_LABELS = {
         ClassD:    'Класс Д',
         Scientist: 'Учёный',
-		Medic:	   'Медик',
+                Medic:     'Медик',
         Engineer:  'Инженер',
         Director:  'Директор',
         Manager:   'Менеджер',
@@ -102,6 +102,20 @@
 
     // ID выбранной записи
     let _selected = null;
+
+    // Поколение фоновой подгрузки. FIX: execute() запускает асинхронный
+    // prefetch-цикл; при переоткрытии окна старый цикл не умирал (проверка
+    // существования окна не срабатывала — окно переиспользуется через
+    // setContent) → дублирующиеся fetch-батчи и refreshList. Инкремент
+    // поколения при каждом execute() позволяет старому циклу выйти.
+    let _loadEpoch = 0;
+
+    // Экранирование HTML для значений из удалённых досье: [TITLE], метаданные
+    // !COM-блока и имена файлов попадают в innerHTML списка/превью/заголовка
+    // окна. Досье публикуются сообществом — без экранирования это stored XSS:
+    // [TITLE] <img src=x onerror=…> исполнялся у каждого открывшего проводник.
+    const _esc = s => String(s ?? '').replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
     /**
      * Вывод «в терминал» рендерит в #dossier-output, который в режиме
@@ -198,9 +212,7 @@
             display:      flex;
             flex-direction: column;
         }
-        .dex-list::-webkit-scrollbar        { width: 3px; }
-        .dex-list::-webkit-scrollbar-track  { background: rgba(0,0,0,0.3); }
-        .dex-list::-webkit-scrollbar-thumb  { background: rgba(0,180,80,0.4); border-radius: 2px; }
+        /* (скроллбар .dex-list — единый системный, см. windows.css) */
 
         .dex-empty {
             padding:      14px;
@@ -255,9 +267,7 @@
             gap:       10px;
             min-height: 0;
         }
-        .dex-preview::-webkit-scrollbar        { width: 3px; }
-        .dex-preview::-webkit-scrollbar-track  { background: rgba(0,0,0,0.3); }
-        .dex-preview::-webkit-scrollbar-thumb  { background: rgba(0,180,80,0.4); border-radius: 2px; }
+        /* (скроллбар .dex-preview — единый системный, см. windows.css) */
 
         .dex-preview-hint {
             margin:     auto;
@@ -349,40 +359,50 @@
             border-color: rgba(80,210,255,0.4);
         }
 
-        /* ── Баннер пропуска: прилипает к верху скролл-области ── */
+        /* ── Баннер пропуска: полоса строго под шапкой окна ── */
         /*                                                                  */
-        /*  .lyoko-content-inner — скроллящийся контейнер (overflow-y:auto). */
-        /*  sticky top:0 держит баннер у его верхнего края, т.е. визуально   */
-        /*  сразу под тайтлбаром окна, независимо от прокрутки контента.    */
-        /*  Отрицательные margin компенсируют padding инера (14px/16px),    */
-        /*  чтобы баннер растягивался во всю ширину окна без зазоров.       */
+        /*  Живёт НЕ в скроллящемся .lyoko-content, а отдельным child'ом    */
+        /*  .lyoko-window сразу после .lyoko-titlebar. Окно — flex-column,  */
+        /*  поэтому полоса занимает собственную строку: контент не пробегает */
+        /*  под ней, output не перекрывается и скроллится в чистой области. */
+        /*  max-height — точка отсчёта для плавного схлопывания (.done),    */
+        /*  когда рендер досье завершается.                                  */
         .dex-skip-banner {
-            position:      sticky;
-            top:           0;
-            z-index:       3;             /* выше scanline-псевдоэлемента (z-index:1) */
             flex-shrink:   0;
+            overflow:      hidden;
+            max-height:    72px;           /* > одной строки — на случай переноса */
             text-align:    center;
-            margin:        -14px -16px 10px;
             padding:       6px 16px;
             font-size:     0.62em;
             letter-spacing: 1.8px;
             color:         rgba(255,140,140,0.92);
-            background:    rgba(6, 12, 9, 0.94);   /* почти непрозрачный — перекрывает контент под собой */
+            background:    rgba(6, 12, 9, 0.94);
             border-bottom: 1px solid rgba(220,30,30,0.3);
-            box-shadow:    0 4px 10px -4px rgba(0,0,0,0.5);
             cursor:        pointer;
-            transition:    background 0.12s;
+            transition:
+                background 0.12s,
+                max-height 0.24s ease,
+                padding    0.24s ease,
+                opacity    0.20s ease,
+                border-bottom-width 0.24s ease;
             animation:     dexSkipPulse 2.2s ease-in-out infinite;
         }
         .dex-skip-banner:hover { background: rgba(40, 8, 8, 0.94); }
+
+        /* Рендер завершён: полоса схлопывается, окно мягко «дораскрыается» */
+        .dex-skip-banner.done {
+            animation: none;               /* пульс не должен мешать opacity:0 */
+            max-height: 0;
+            padding-top:    0;
+            padding-bottom: 0;
+            border-bottom-width: 0;
+            opacity:        0;
+            pointer-events: none;
+        }
+
         @keyframes dexSkipPulse {
             0%, 100%{ opacity: 1;   }
             50%     { opacity: 0.7; }
-        }
-
-        /* Мобильная версия: padding инера другой (12px/14px) — подгоняем bleed */
-        @media (hover: none), (pointer: coarse) {
-            .dex-skip-banner { margin: -12px -14px 10px; }
         }
 
         /* ── Вкладки ── */
@@ -754,6 +774,22 @@
         }
     }
 
+    /**
+     * Плавно убирает баннер пропуска после завершения рендера досье:
+     * класс .done схлопывает полосу (max-height/padding/opacity → 0),
+     * затем баннер удаляется из DOM — окно «дораскрыается» без рывка.
+     */
+    function _retireSkipBanner(banner) {
+        if (!banner?.isConnected) return;
+        banner.classList.add('done');
+        banner.addEventListener('transitionend', function onEnd(e) {
+            if (e.propertyName !== 'max-height') return; // ждём именно схлопывание
+            banner.removeEventListener('transitionend', onEnd);
+            banner.remove();
+        });
+        setTimeout(() => banner.remove(), 400); // страховка: transitionend может не прийти
+    }
+
     // ── Загрузка одного досье (с кэшем) ───────────────────────────────────────
 
     async function _loadDossier(id) {
@@ -870,11 +906,11 @@
             // ── Инфопанель ──
             localInfo.style.display = '';
             localInfo.innerHTML = `
-                <span class="dex-local-filename">📄 ${localState.name}</span>
+                <span class="dex-local-filename">📄 ${_esc(localState.name)}</span>
                 <span class="dex-local-clear" id="dex-local-clear">✕ ОЧИСТИТЬ</span>
                 ${missing.length
                     ? `<div class="dex-local-missing">⚠ НЕ ХВАТАЕТ ИЗОБРАЖЕНИЙ:
-                        <div class="dex-local-missing-list">${missing.join(', ')}</div></div>`
+                        <div class="dex-local-missing-list">${_esc(missing.join(', '))}</div></div>`
                     : `<div class="dex-local-ok">✓ ВСЕ ФАЙЛЫ НА МЕСТЕ</div>`}
             `;
             localInfo.querySelector('#dex-local-clear').addEventListener('click', resetLocalState);
@@ -882,9 +918,9 @@
             // ── Превью ──
             localPreview.innerHTML = `
                 <div class="dex-preview-badge">ЛОКАЛЬНЫЙ ФАЙЛ</div>
-                <div class="dex-preview-title">${title}</div>
+                <div class="dex-preview-title">${_esc(title)}</div>
                 <hr class="dex-preview-divider">
-                <div class="dex-preview-excerpt">${excerpt || '—'}</div>
+                <div class="dex-preview-excerpt">${_esc(excerpt) || '—'}</div>
             `;
 
             // Кнопки доступны только когда все требуемые изображения на месте
@@ -896,6 +932,16 @@
         async function handleLocalFiles(fileList) {
             const files = Array.from(fileList);
             let changed = false;
+
+            // АУДИО → ПЛЕЕР: аудиофайлы не являются частью досье — их забирает
+            // АУДИО ПЛЕЕР (окно открывается поверх, файлы добавляются в
+            // «ЛОКАЛЬНЫЕ ФАЙЛЫ» и сразу играют). Досье-логика ниже не меняется.
+            const audioFiles = files.filter(f =>
+                (f.type || '').startsWith('audio/') ||
+                /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus)$/i.test(f.name || ''));
+            if (audioFiles.length && typeof AudioPlayerApp !== 'undefined') {
+                AudioPlayerApp.open({ files: audioFiles });
+            }
 
             const txtFile = files.find(f => f.name.toLowerCase().endsWith('.txt'));
             if (txtFile && !localState.content) {
@@ -911,7 +957,8 @@
             }
 
             if (changed) renderLocalState();
-            else if (!localState.content) {
+            else if (!localState.content && !audioFiles.length) {
+                // Аудио уже ушли в плеер — сообщение про .txt не показываем
                 terminal.printError('Файл .txt не найден среди перетащенных файлов.');
             }
         }
@@ -1041,8 +1088,8 @@
                 el.className   = 'dex-item' + (item.id === _selected ? ' selected' : '');
                 el.dataset.id  = item.id;
                 el.innerHTML   = `
-                    <span class="dex-item-id">${item.id}${item.meta?.wip ? ' <span class="dex-item-wip-tag">WIP</span>' : ''}${item.meta?.status === 'Dead' ? ' <span class="dex-item-dead-tag">✝</span>' : ''}</span>
-                    <span class="dex-item-title ${item.title ? '' : 'dex-pending'}">${item.title ?? '…'}</span>
+                    <span class="dex-item-id">${_esc(item.id)}${item.meta?.wip ? ' <span class="dex-item-wip-tag">WIP</span>' : ''}${item.meta?.status === 'Dead' ? ' <span class="dex-item-dead-tag">✝</span>' : ''}</span>
+                    <span class="dex-item-title ${item.title ? '' : 'dex-pending'}">${_esc(item.title) ?? '…'}</span>
                 `;
                 el.addEventListener('click', () => selectItem(item.id));
                 frag.appendChild(el);
@@ -1087,15 +1134,15 @@
 
             const m = data.meta;
             previewEl.innerHTML = `
-                <div class="dex-preview-badge">ID: ${id}</div>
+                <div class="dex-preview-badge">ID: ${_esc(id)}</div>
                 ${m.status ? `<div class="dex-status-badge ${m.status === 'Dead' ? 'dex-status-dead' : 'dex-status-alive'}">${m.status === 'Dead' ? '✝ МЁРТВ' : '● ЖИВ'}</div>` : ''}
                 ${m.wip ? `<div class="dex-wip-banner">⚠ ДОСЬЕ НАХОДИТСЯ В РАЗРАБОТКЕ</div>` : ''}
-                <div class="dex-preview-title">${data.title}</div>
+                <div class="dex-preview-title">${_esc(data.title)}</div>
                 ${(m.author || m.organization || m.profession) ? `
                 <div class="dex-preview-meta">
-                    ${m.author       ? `<div class="dex-meta-row"><span class="dex-meta-label">АВТОР</span><span class="dex-meta-value">${m.author}</span></div>` : ''}
-                    ${m.organization ? `<div class="dex-meta-row"><span class="dex-meta-label">ФРАКЦИЯ</span><span class="dex-meta-value">${ORG_LABELS[m.organization] ?? m.organization}</span></div>` : ''}
-                    ${m.profession   ? `<div class="dex-meta-row"><span class="dex-meta-label">ДОЛЖНОСТЬ</span><span class="dex-meta-value">${PROF_LABELS[m.profession] ?? m.profession}</span></div>` : ''}
+                    ${m.author       ? `<div class="dex-meta-row"><span class="dex-meta-label">АВТОР</span><span class="dex-meta-value">${_esc(m.author)}</span></div>` : ''}
+                    ${m.organization ? `<div class="dex-meta-row"><span class="dex-meta-label">ФРАКЦИЯ</span><span class="dex-meta-value">${_esc(ORG_LABELS[m.organization] ?? m.organization)}</span></div>` : ''}
+                    ${m.profession   ? `<div class="dex-meta-row"><span class="dex-meta-label">ДОЛЖНОСТЬ</span><span class="dex-meta-value">${_esc(PROF_LABELS[m.profession] ?? m.profession)}</span></div>` : ''}
                 </div>` : ''}
             `;
         }
@@ -1138,11 +1185,13 @@
         refreshList();
 
         // Подгружаем досье батчами по 4 — заголовок, мета (автор/фракция/WIP)
+        // FIX: epoch — старый prefetch-цикл умирает, если окно переоткрыли
+        const epoch = ++_loadEpoch;
         (async () => {
             const BATCH = 4;
             for (let i = 0; i < allItems.length; i += BATCH) {
-                // Если окно закрыто — останавливаемся
-                if (!document.querySelector(`[data-id="${DEX_WIN_ID}"]`)) return;
+                // Если окно закрыто ИЛИ переоткрыто (новое поколение) — останавливаемся
+                if (epoch !== _loadEpoch || !document.querySelector(`[data-id="${DEX_WIN_ID}"]`)) return;
 
                 const batch = allItems.slice(i, i + BATCH);
                 await Promise.all(batch.map(async item => {
@@ -1168,7 +1217,7 @@
         const winId = DOS_WIN_PREFIX + id;
 
         // Открываем окно с placeholder-ом
-        PluginAPI.WindowManager.open(winId, `ДОСЬЕ: ${title}`, `
+        PluginAPI.WindowManager.open(winId, `ДОСЬЕ: ${_esc(title)}`, `
             <div id="dex-dos-wrap-${id}">
                 <div style="padding:20px;text-align:center;font-size:0.7em;
                             letter-spacing:2px;color:rgba(0,238,0,0.25);">
@@ -1196,11 +1245,18 @@
         // Очищаем placeholder, строим структуру для рендера
         inner.innerHTML = '';
 
+        // Баннер пропуска анимации — НЕ внутри скроллящегося output, а отдельной
+        // полосой строго под шапкой окна: между .lyoko-titlebar и
+        // .lyoko-content-wrapper. Текст досье бежит только в своей области,
+        // баннер его не перекрывает и не уезжает вместе со скроллом.
         const banner = document.createElement('div');
         banner.className   = 'dex-skip-banner';
         banner.textContent = '● НАЖМИТЕ ЗДЕСЬ ИЛИ ПРОБЕЛ ДЛЯ ПРОПУСКА АНИМАЦИИ';
         banner.addEventListener('click', () => PluginAPI.renderer?.skip());
-        inner.appendChild(banner);
+
+        const contentWrapper = win.querySelector('.lyoko-content-wrapper');
+        if (contentWrapper) win.insertBefore(banner, contentWrapper); // под шапкой
+        else inner.appendChild(banner); // защитный fallback (структура окна изменилась)
 
         const outputDiv = document.createElement('div');
         inner.appendChild(outputDiv);
@@ -1229,7 +1285,7 @@
         try {
             await PluginAPI.renderer.render(content, outputDiv, imageBase, imageMap);
         } finally {
-            banner.remove();
+            _retireSkipBanner(banner);
             document.removeEventListener('keydown', onSpace);
         }
     }

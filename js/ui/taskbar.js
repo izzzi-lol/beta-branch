@@ -51,11 +51,23 @@ const Taskbar = (() => {
         return true;
     }
 
+    // Экранирование для innerHTML — плагины и заголовки окон могут содержать
+    // сторонний/удалённый текст, нельзя допустить HTML-инъекцию.
+    const _esc = s => String(s ?? '').replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
     // ── Старт-меню ───────────────────────────────────────────────────────────
-    function _renderStartMenu() {
+    // FIX: PluginManager.getAll() — async, раньше вызывался без await:
+    // Promise вместо массива → секция плагинов никогда не отрисовывалась.
+    async function _renderStartMenu() {
         if (!menu) return;
-        const apps    = AppRegistry.list();
-        const plugins = (typeof PluginManager !== 'undefined') ? (PluginManager.getAll() || []) : [];
+        const apps = AppRegistry.list();
+
+        let plugins = [];
+        if (typeof PluginManager !== 'undefined') {
+            try { plugins = (await PluginManager.getAll()) || []; }
+            catch (_) { plugins = []; }
+        }
 
         menu.innerHTML = `
             <div class="os-sm-header">
@@ -72,7 +84,7 @@ const Taskbar = (() => {
                 <div class="os-sm-section">УСТАНОВЛЕННЫЕ ПРОГРАММЫ</div>
                 <div class="os-sm-plugins">
                     ${plugins.map(p => `
-                        <button class="os-sm-plugin" data-cmd="${p.command}">▸ ${p.name}</button>`).join('')}
+                        <button class="os-sm-plugin" data-cmd="${_esc(p.command)}">▸ ${_esc(p.name)}</button>`).join('')}
                 </div>` : ''}
         `;
 
@@ -114,8 +126,8 @@ const Taskbar = (() => {
 
         winBtns.innerHTML = wins.map(w => `
             <button class="os-win-btn${w.focused ? ' focused' : ''}${w.minimized ? ' minimized' : ''}"
-                    data-win-id="${w.id}" title="${w.title}">
-                <span class="os-win-label">${w.title}</span>
+                    data-win-id="${_esc(w.id)}" title="${_esc(w.title)}">
+                <span class="os-win-label">${_esc(w.title)}</span>
             </button>`).join('');
 
         winBtns.querySelectorAll('.os-win-btn').forEach(btn => {

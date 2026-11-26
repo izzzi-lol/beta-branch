@@ -36,9 +36,12 @@ const CmdPlugin = {
             case '':
                 await PluginManager.list(terminal);
                 break;
-			case 'autostart':
-				await PluginManager.autostart(args[0], terminal);
-				break;
+                        case 'autostart':
+                                // FIX: было args[0] — туда попадала строка "autostart",
+                                // поэтому plugin autostart <id> всегда отвечал
+                                // «ПЛАГИН НЕ НАЙДЕН». Передаём arg (args[1]) — id.
+                                await PluginManager.autostart(arg, terminal);
+                                break;
             case 'help':
             default:
                 terminal.printSystem('ИСПОЛЬЗОВАНИЕ: plugin <команда> [аргумент]');
@@ -46,7 +49,7 @@ const CmdPlugin = {
                 terminal.printSystem('  plugin list               — список установленных плагинов');
                 terminal.printSystem('  plugin install <url>      — установить плагин из URL');
                 terminal.printSystem('  plugin remove <id>        — удалить плагин');
-				terminal.printSystem('  plugin autostart <id> 	  — устанавливает флаг на автозапуск');
+                                terminal.printSystem('  plugin autostart <id>     — устанавливает флаг на автозапуск');
                 terminal.printSystem('  plugin update <id>        — перезагрузить плагин с исходного URL');
                 terminal.printSystem('');
                 terminal.printSystem('  <id> — идентификатор из "plugin list"');

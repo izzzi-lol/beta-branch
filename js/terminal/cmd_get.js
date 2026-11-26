@@ -12,9 +12,6 @@ const DOSSIERS_BRANCH = "DossiersBase";        // Бранч, где храня�
 // Базовый URL для загрузки сырых файлов с нужного бранча
 const RAW_BASE = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${DOSSIERS_BRANCH}`;
 
-// Токен хранится в двойном base64 — не идеальная защита, но лучше, чем plaintext.
-// В продакшене лучше проксировать через свой backend.
-
 const CmdGet = {
     // Кэш последних результатов поиска (для команды GET recent)
     recentMatches: [],

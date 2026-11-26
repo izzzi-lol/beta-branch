@@ -225,6 +225,30 @@ function _brOpenWindow(url) {
 }
 
 // ── Навигация ─────────────────────────────────────────────────────────────────
+
+// Экранирование URL для вставки в HTML-подсказки (адрес вводит пользователь
+// в адресную строку — кавычка в нём ломала атрибут href и позволяла
+// внедрить обработчики on*).
+const _brEsc = s => String(s ?? '').replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// CRITICAL FIX: sandbox теперь зависит от режима.
+// Раньше iframe имел статичный sandbox="allow-scripts allow-same-origin …",
+// а в PROXY-режиме чужой HTML грузился через srcdoc. Связка
+// srcdoc + allow-same-origin давала скриптам ЛЮБОГО сайта origin НАШЕГО
+// сайта: доступ к localStorage/IndexedDB и возможность молча прописать
+// себе плагин с автозапуском — постоянный RCE от одного клика по ссылке.
+//   PROXY (srcdoc) → БЕЗ allow-same-origin: opaque origin, доступ к нашему
+//                    DOM/storage закрыт (скрипты сайта работают, изоляция — да).
+//   DIRECT (src)   → с allow-same-origin: фрейм живёт в СВОЁМ origin,
+//                    как обычный iframe (нужно чужим сайтам для cookies/storage).
+function _brApplySandbox(frame, allowSameOrigin) {
+    const tokens = ['allow-scripts', 'allow-forms', 'allow-popups',
+                    'allow-top-navigation-by-user-activation'];
+    if (allowSameOrigin) tokens.push('allow-same-origin');
+    frame.setAttribute('sandbox', tokens.join(' '));
+}
+
 function _brNavigate(win, url, useProxy) {
     if (!url) return;
 
@@ -268,6 +292,7 @@ function _brNavigate(win, url, useProxy) {
             .then(data => {
                 if (!data.contents) throw new Error('empty contents');
                 // srcdoc не конфликтует с src — сначала сбросим src
+                _brApplySandbox(frame, false);   // opaque origin для чужого HTML
                 frame.removeAttribute('src');
                 frame.srcdoc = data.contents;
                 status.textContent = '[PROXY] ' + url;
@@ -275,7 +300,7 @@ function _brNavigate(win, url, useProxy) {
             .catch(() => {
                 _showError(`
                     Прокси не помог.<br>
-                    <a href="${url}" target="_blank"
+                    <a href="${_brEsc(url)}" target="_blank" rel="noopener noreferrer"
                        style="color:rgba(0,200,180,0.5);text-decoration:underline">
                        ↗ Открыть в новой вкладке
                     </a>`);
@@ -291,7 +316,7 @@ function _brNavigate(win, url, useProxy) {
                 ⚡ Попробовать через прокси
             </span>
             &nbsp;|&nbsp;
-            <a href="${url}" target="_blank"
+            <a href="${_brEsc(url)}" target="_blank" rel="noopener noreferrer"
                style="color:rgba(0,200,180,0.5);text-decoration:underline">
                ↗ Открыть в новой вкладке
             </a>`);
@@ -312,6 +337,7 @@ function _brNavigate(win, url, useProxy) {
         }
     };
 
+    _brApplySandbox(frame, true);   // прямой src — фрейм в своём origin
     frame.removeAttribute('srcdoc');
     frame.src = url;
 }

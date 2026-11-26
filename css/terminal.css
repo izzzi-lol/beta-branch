@@ -811,11 +811,8 @@ body.locked { overflow: hidden; }
     color: inherit !important;
 }
 
-/* Скроллбар в стиле CRT */
-#dossier-output::-webkit-scrollbar       { width: 4px; }
-#dossier-output::-webkit-scrollbar-track { background: #050505; }
-#dossier-output::-webkit-scrollbar-thumb { background: rgba(0,255,65,0.25); border-radius: 2px; }
-#dossier-output::-webkit-scrollbar-thumb:hover { background: rgba(0,255,65,0.5); }
+/* Скроллбар терминала — единый системный, см. windows.css
+   (::-webkit-scrollbar, 4px фосфорно-зелёный) */
 
 /* ============================================
    SCP SPLASH SCREEN  —  ПЕРЕРАБОТАННАЯ ВЕРСИЯ

@@ -246,10 +246,44 @@
     z-index: 1;
 }
 
-/* Скроллбар */
-.lyoko-content::-webkit-scrollbar       { width: 3px; }
-.lyoko-content::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
-.lyoko-content::-webkit-scrollbar-thumb { background: rgba(0,180,80,0.4); border-radius: 2px; }
+/* ── Единый кастомный скроллбар для ВСЕЙ системы ────────────── */
+/*                                                               */
+/*  Одна фосфорная полоса на всё: терминал, все окна, списки DEX, */
+/*  редактор, аудио-плеер, панели настроек и что бы ни появилось. */
+/*  Правило глобальное (весь документ), поэтому приложениям       */
+/*  больше не нужно дублировать его локально. Более специфичные   */
+/*  правила по-прежнему сильнее: например display:none у скролл-  */
+/*  стрипа вкладок .lyoko-tab-strip работает как задумано.        */
+::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.3);
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(0, 255, 65, 0.35);
+    border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 255, 65, 0.6);
+}
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* Firefox: ::-webkit-* там не работают — нужны стандартные свойства.
+   ВАЖНО: gate @supports обязателен. Chromium ≥121 понимает
+   scrollbar-width/scrollbar-color, и стандартные свойства ПЕРЕБИВАЮТ
+   ::-webkit-scrollbar: без gate все окна рисовали бы системный
+   «thin» (~10px) вместо наших 4px. Chromium не знает -moz-appearance,
+   поэтому этот блок выполняется только в Firefox. */
+@supports (-moz-appearance: none) {
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(0, 255, 65, 0.4) rgba(0, 0, 0, 0.3);
+    }
+}
 
 /* ── Угловые декор-уголки ───────────────────────────────────── */
 .lyoko-window::before,

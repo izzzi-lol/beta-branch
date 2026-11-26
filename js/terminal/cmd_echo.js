@@ -191,21 +191,22 @@ const CmdEcho = {
         };
         window.addEventListener('keydown', onKeyDown, {capture: true});
 
-        // 5. Запускаем аудио
-        try {
-            await audio.play();
-        } catch (_) {
-            terminal.printSystem('⚠ АУДИО НЕДОСТУПНО — ТОЛЬКО СУБТИТРЫ');
-        }
+        // 5. Запускаем аудио.
+        // FIX: здесь был мёртвый блок `await audio.play()` — переменной `audio`
+        // не существует (остаток рефакторинга на AudioHandler). ReferenceError
+        // ловился catch'ем и на КАЖДОМ запуске печатал
+        // «АУДИО НЕДОСТУПНО — ТОЛЬКО СУБТИТРЫ», даже когда звук играл нормально.
+        // Провал воспроизведения обрабатывается через onFail в AudioHandler.play
+        // (см. шаг 2 выше) — дублировать его здесь не нужно.
         // 6. Рендерим текст (ждём полного завершения)
         terminal.lockInput();
         const outputContainer = TerminalAPI.getOutputNode();
 
         terminal.printSystem(`— НАЧАЛО ЗАПИСИ ${id.toUpperCase()} —`);
         await new Promise(r => setTimeout(r, 20));
-		try {
-        	await renderer.render(textContent, outputContainer, `${ECHO_RAW_BASE}/${ECHOES_ROOT}/${id}/`);
-		} finally {
+                try {
+                await renderer.render(textContent, outputContainer, `${ECHO_RAW_BASE}/${ECHOES_ROOT}/${id}/`);
+                } finally {
             banner.remove();
             window.removeEventListener('keydown', onKeyDown, { capture: true });
             this._currentRenderer = null;
@@ -213,7 +214,7 @@ const CmdEcho = {
             renderer.timeScale    = 1;      // глобальный инстанс — вернуть масштаб
             renderer.audioClock   = null;   // и аудио-часы тоже
             terminal.unlockInput();
-		}
+                }
     },
 
     // -------------------------------------------------------------------------

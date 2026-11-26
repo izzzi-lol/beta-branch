@@ -61,6 +61,10 @@ const EchoArchive = (() => {
             .toUpperCase();
     }
 
+    // Экранирование — id записей приходят из GitHub (контент сообщества)
+    const _esc = s => String(s ?? '').replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
     function open() {
         const html = `
             <div class="os-echo">
@@ -93,20 +97,25 @@ const EchoArchive = (() => {
                 }
 
                 listEl.innerHTML = records.map(id => `
-                    <button class="os-explorer-item" data-echo="${id}">
+                    <button class="os-explorer-item" data-echo="${_esc(id)}">
                         <span class="os-doc-icon">${AppRegistry.ICONS.echo}</span>
-                        <span>${_prettyName(id)}</span>
+                        <span>${_esc(_prettyName(id))}</span>
                     </button>`).join('');
 
                 listEl.querySelectorAll('.os-explorer-item').forEach(btn => {
                     btn.addEventListener('click', () => {
+                        // FIX: закрываем окно архива — раньше оно оставалось
+                        // открытым поверх терминала, где идут субтитры; на
+                        // мобилке окна fullscreen — запись была полностью
+                        // скрыта за архивом.
+                        try { WindowManager.close(WINDOW_ID); } catch (_) {}
                         // Плейбэк терминальный — уходим в консоль и запускаем команду
                         if (typeof Desktop !== 'undefined') Desktop.showConsole();
                         TerminalAPI.typeAndExecute(`echo ${btn.dataset.echo}`);
                     });
                 });
             } catch (e) {
-                listEl.innerHTML = `<div class="os-explorer-hint">ОШИБКА АРХИВА: ${e.message}</div>`;
+                listEl.innerHTML = `<div class="os-explorer-hint">ОШИБКА АРХИВА: ${_esc(e.message)}</div>`;
             }
         });
     }

@@ -193,6 +193,16 @@ const PluginAPI = (() => {
             return false;
         }
 
+        // FIX: плагин не может перехватывать встроенные команды терминала.
+        // Раньше guard был только плагин-плагин: плагин с command: 'get'
+        // молча hijack'ил выдачу GET через патч CommandHandler (диспетчер
+        // плагинов проверяется ПЕРВЫМ) — весь трафик get шёл через него.
+        const cmdList = (typeof COMMAND_LIST !== 'undefined') ? COMMAND_LIST : window.COMMAND_LIST;
+        if (Array.isArray(cmdList) && cmdList.includes(cmd)) {
+            console.warn(`[PluginAPI] Команда "${cmd}" — встроенная, установка отклонена`);
+            return false;
+        }
+
         // autostart — пожелание автора плагина: запускать команду автоматически
         // при каждой загрузке сайта. Решение принимается на установке (PluginManager.install),
         // пользователь может в любой момент переключить через "plugin autostart <id>"
@@ -203,10 +213,8 @@ const PluginAPI = (() => {
             execute,
         };
 
-        // Добавляем в COMMAND_LIST для автодополнения.
-        // COMMAND_LIST объявлена const в commands.js — global lexical binding,
-        // на window её нет, поэтому typeof-guard вместо window.X.
-        const cmdList = (typeof COMMAND_LIST !== 'undefined') ? COMMAND_LIST : window.COMMAND_LIST;
+        // Добавляем в COMMAND_LIST для автодополнения (cmdList уже получен
+        // выше, в проверке встроенных команд).
         if (Array.isArray(cmdList) && !cmdList.includes(cmd)) {
             cmdList.push(cmd);
         }

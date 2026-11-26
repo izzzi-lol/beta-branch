@@ -227,18 +227,28 @@ const Cabinet = (() => {
         </div>`;
     }
 
+    // Экранирование HTML. FIX: поля JWT (username/avatar/id) приходят из
+    // ДЕКОДИРОВАННОГО НА КЛИЕНТЕ токена (#token=… в URL) — сервер их ещё не
+    // проверял. Раньше username/avatar вставлялись в innerHTML как есть:
+    // поддельный payload с <img src=x onerror=…> исполнялся при открытии
+    // кабинета. Доверять decoded-JWT полям нельзя до серверной верификации.
+    function _escHtml(s) {
+        return String(s ?? '').replace(/[&<>"']/g,
+            c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
     function _buildCabinetHTML(user) {
         const draft = localStorage.getItem(LS_DRAFT) ?? '';
         return `<div class="cab-root">
 
             <div class="cab-profile">
                 ${user.avatar
-                    ? `<img class="cab-avatar" src="${user.avatar}" alt="">`
+                    ? `<img class="cab-avatar" src="${_escHtml(user.avatar)}" alt="">`
                     : `<div class="cab-avatar-placeholder">⬡</div>`
                 }
                 <div class="cab-user-info">
-                    <div class="cab-username">${user.username}</div>
-                    <div class="cab-user-sub">ID: ${user.id} · АВТОР</div>
+                    <div class="cab-username">${_escHtml(user.username)}</div>
+                    <div class="cab-user-sub">ID: ${_escHtml(user.id)} · АВТОР</div>
                 </div>
                 <button class="cab-logout-btn" id="cab-logout">ВЫЙТИ</button>
             </div>
@@ -247,7 +257,7 @@ const Cabinet = (() => {
                 <span class="cab-id-label">ID ДОСЬЕ:</span>
                 <input class="cab-id-input" id="cab-id" type="text"
                     placeholder="my-dossier-01" maxlength="64"
-                    value="${localStorage.getItem('cabinet:last-id') ?? ''}">
+                    value="${_escHtml(localStorage.getItem('cabinet:last-id') ?? '')}">
             </div>
 
             <div class="cab-editor">
@@ -258,7 +268,7 @@ const Cabinet = (() => {
 
 [H1] [CENTER] Личные данные
 ..."
-                    spellcheck="false">${draft}</textarea>
+                    spellcheck="false">${_escHtml(draft)}</textarea>
             </div>
 
             <div class="cab-progress" id="cab-progress">

@@ -30,6 +30,16 @@ const CmdUpload = {
             fileInput.multiple = true;
             fileInput.accept  = '.txt,.mp3,image/*';
 
+            // FIX: отмена диалога — раньше Promise не резолвился никогда:
+            // onchange срабатывает только при выборе файлов, и `await
+            // promptForFiles()` повисал навсегда вместе с сессией upload.
+            // Событие 'cancel' на file input поддерживают все современные
+            // браузеры (Chrome 113+, Firefox 91+, Safari 16.4+).
+            fileInput.oncancel = () => {
+                terminal.printSystem("[СИСТЕМА] ВЫБОР ФАЙЛОВ ОТМЕНЁН ОПЕРАТОРОМ.");
+                resolve();
+            };
+
             fileInput.onchange = async (event) => {
                 const files = Array.from(event.target.files);
 
@@ -49,10 +59,12 @@ const CmdUpload = {
                     this.audioName = mp3File.name;
                 }
 
-                // 3. Изображения
+                // 3. Изображения (FIX: fileToBase64 может вернуть null при ошибке
+                // чтения — тогда файл просто считается незагруженным)
                 const imageFiles = files.filter(f => f.type.startsWith('image/'));
                 for (const img of imageFiles) {
-                    this.sessionFiles[img.name] = await this.fileToBase64(img);
+                    const b64 = await this.fileToBase64(img);
+                    if (b64) this.sessionFiles[img.name] = b64;
                 }
 
                 // ── Ветка: обнаружен mp3 ─────────────────────────────────────
@@ -280,6 +292,9 @@ const CmdUpload = {
         return new Promise((resolve) => {
             const r = new FileReader();
             r.onload  = e => resolve(e.target.result);
+            // FIX: без onerror/onabort Promise висел навсегда при сбое чтения
+            r.onerror = () => resolve(null);
+            r.onabort = () => resolve(null);
             r.readAsDataURL(file);
         });
     },
